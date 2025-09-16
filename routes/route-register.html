@@ -1,0 +1,106 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>正規ルート登録ツール</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- GPX→GeoJSON 変換 -->
+<script src="https://unpkg.com/@tmcw/togeojson@5.8.0/dist/togeojson.umd.js"></script>
+<!-- 簡略化（Douglas-Peucker） -->
+<script src="https://unpkg.com/simplify-js@1.2.4/simplify.min.js"></script>
+<style>
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,Meiryo,sans-serif}
+  #map{height:70vh}
+  .bar{display:flex;gap:8px;align-items:center;padding:8px}
+  input[type=number]{width:7em}
+  .mono{font-family:ui-monospace,Consolas,monospace}
+</style>
+
+<div class="bar">
+  <input id="file" type="file" accept=".gpx,.geojson,.json,.csv">
+  簡略化誤差[m]: <input id="tolerance" type="number" value="10" min="0" step="1">
+  <button id="btnSimplify">プレビュー/簡略化</button>
+  <button id="btnSave" disabled>official-route.geojson を保存</button>
+  <span id="info" class="mono"></span>
+</div>
+<div id="map"></div>
+
+<script>
+let map = L.map('map').setView([35.0,135.86], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+let routeLayer; let currentGeoJSON;
+
+function parseCSV(text){
+  // 1行目ヘッダ想定: lat,lng もしくは lng,lat
+  const rows = text.trim().split(/\r?\n/).map(r=>r.split(',').map(s=>s.trim()));
+  const head = rows.shift().map(s=>s.toLowerCase());
+  const iLat = head.indexOf('lat'), iLng = head.indexOf('lng');
+  if(iLat<0 || iLng<0) throw new Error('CSVヘッダに lat,lng が必要です');
+  const coords = rows.map(r=>[+r[iLng], +r[iLat]]).filter(a=>Number.isFinite(a[0])&&Number.isFinite(a[1]));
+  return { type:'Feature', geometry:{ type:'LineString', coordinates: coords }, properties:{} };
+}
+
+async function readAsText(file){
+  return await file.text();
+}
+
+document.getElementById('btnSimplify').onclick = async ()=>{
+  const f = document.getElementById('file').files[0];
+  if(!f){ alert('GPX/GeoJSON/CSVファイルを選んでください'); return; }
+  try{
+    let gj;
+    if(f.name.toLowerCase().endsWith('.gpx')){
+      const xml = new DOMParser().parseFromString(await readAsText(f), 'text/xml');
+      gj = togeojson.gpx(xml); // LineString or MultiLineString
+      // 統一のため最初のLineStringだけ採用
+      const line = gj.features.find(ft=>ft.geometry.type.includes('Line'));
+      gj = { type:'FeatureCollection', features:[line] };
+    }else if(f.name.toLowerCase().endsWith('.csv')){
+      gj = { type:'FeatureCollection', features:[ parseCSV(await readAsText(f)) ] };
+    }else{
+      gj = JSON.parse(await readAsText(f)); // .geojson/.json
+      if(gj.type!=='FeatureCollection') gj = { type:'FeatureCollection', features:[gj] };
+    }
+
+    // 単一LineStringにまとめる
+    let coords=[];
+    gj.features.forEach(ft=>{
+      if(ft?.geometry?.type==='LineString') coords.push(...ft.geometry.coordinates);
+      if(ft?.geometry?.type==='MultiLineString') ft.geometry.coordinates.forEach(c=>coords.push(...c));
+    });
+    if(coords.length<2) throw new Error('線の座標が見つかりません');
+
+    // 簡略化（簡略化はXY平面前提なのでWGS84→擬似メートル換算）
+    const tol = +document.getElementById('tolerance').value || 0;
+    const pts = coords.map(c=>({x:c[0], y:c[1]})); // lng,lat
+    const simp = tol>0 ? window.simplify(pts, tol/111000, true) : pts; // 1度≒111km
+    const simpCoords = simp.map(p=>[p.x, p.y]);
+
+    currentGeoJSON = {
+      type:'FeatureCollection',
+      features:[{type:'Feature', properties:{name:f.name, tolerance_m:tol}, geometry:{type:'LineString', coordinates:simpCoords}}]
+    };
+
+    // 表示
+    if(routeLayer) routeLayer.remove();
+    routeLayer = L.geoJSON(currentGeoJSON, {style:{color:'#0aa', weight:5}}).addTo(map);
+    map.fitBounds(routeLayer.getBounds(), {padding:[20,20]});
+
+    document.getElementById('info').textContent = `点数: ${coords.length} → ${simpCoords.length}`;
+    document.getElementById('btnSave').disabled = false;
+  }catch(e){
+    console.error(e);
+    alert('読み込み/簡略化に失敗: ' + e.message);
+  }
+};
+
+document.getElementById('btnSave').onclick = ()=>{
+  if(!currentGeoJSON) return;
+  const blob = new Blob([JSON.stringify(currentGeoJSON)], {type:'application/geo+json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'official-route.geojson';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+</script>
