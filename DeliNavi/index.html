@@ -18,6 +18,39 @@
   <!-- 簡略化（必要に応じて使用） -->
   <script src="https://unpkg.com/simplify-js@1.2.4/simplify.min.js"></script>
 
+  <!-- index.html の地図の上か下に置く -->
+<input id="geojsonPicker" type="file" accept=".geojson,.json" style="margin:8px 0;">
+<script>
+  // Leaflet の map がある前提
+  let trackLayer;
+
+  document.getElementById('geojsonPicker').addEventListener('change', (ev) => {
+    const file = ev.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const gj = JSON.parse(reader.result);
+
+        // 既存の軌跡を消す
+        if (trackLayer) trackLayer.remove();
+
+        // スタイル（見えやすく太め）
+        trackLayer = L.geoJSON(gj, {
+          style: { color:'#ff3b30', weight:4, opacity:0.9 }
+        }).addTo(map);
+
+        // 範囲にフィット
+        map.fitBounds(trackLayer.getBounds(), { padding:[20,20] });
+      } catch (e) {
+        alert('GeoJSON を読み取れませんでした：' + e.message);
+      }
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+</script>
+
   <style>
     html,body { height: 100%; margin: 0; font-family: system-ui, Segoe UI, Roboto, Meiryo, sans-serif; }
     #map { height: 100vh; }
@@ -76,10 +109,10 @@
 
   <script>
   // ====== 設定（ファイルパスなど） ======
-  const CSV_URL = '/DeliNavi/assets/data/points.csv';               // 列: name,lat,lng[,img][,memo]
+  const CSV_URL = '/DeliNavi/assets/data/points.csv';                // 列: name,lat,lng[,img][,memo]
   const OFFICIAL_ROUTE_URL = '/DeliNavi/assets/routes/official-route.geojson';
   const DEVIATION_M = 50;                                    // 正規ルートからの許容逸脱(m)
-
+  
   // ====== 地図初期化 ======
   const map = L.map('map').setView([35.0045, 135.8686], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -301,7 +334,7 @@
 
   // ====== 管理者向け：手描きルート（?admin=1 で有効） ======
   (function(){
-    const isAdmin = new URL(location.href).searchParams.get('admin') === '1';
+    const isAdmin = new URL(location.href).searchParams.get('admin') === '0';
     if (!isAdmin) return;
 
     function loadCss(href){return new Promise((res,rej)=>{const l=document.createElement('link');l.rel='stylesheet';l.href=href;l.onload=res;l.onerror=()=>rej(new Error('css'));document.head.appendChild(l);});}
