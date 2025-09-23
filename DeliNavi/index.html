@@ -68,6 +68,8 @@
     // 正規ルート（MultiLine対応）
     const officialRouteGroup = L.featureGroup().addTo(map);
     let officialSegments = []; // [[{lat,lng}…], …] 最近接距離用
+    let officialRouteFlat = [];    // ★追加：全区間を1本に連結した [ [lat,lng], ... ]
+    let legHighlight = null;       // ★追加：現在の区間ハイライト用ポリライン
 
     // 予定線（CSV順）と目的地
     let plannedLayer = null;
@@ -112,7 +114,12 @@
 
     // ====== 初期ロード ======
     Promise.all([loadOfficialRoute(), loadCSV()])
-      .then(()=>{ setStatus('準備OK。GPS開始でスタート'); fitAll(); })
+      //.then(()=>{ setStatus('準備OK。GPS開始でスタート'); fitAll(); })
+      .then(()=>{
+        updateLegHighlight();         // ★追加：初回の区間を描く
+        setStatus('準備OK。GPS開始でスタート');
+        fitAll();
+      })
       .catch(err=>{ console.error(err); setStatus('読み込みエラー: ' + err.message); });
 
     // ====== 関数群 ======
@@ -174,15 +181,59 @@
           const latlngs = coords.map(([lng,lat])=>[lat,lng]);
           L.polyline(latlngs, {color, weight:5, opacity:.9}).addTo(officialRouteGroup);
           officialSegments.push(latlngs);
+          // ★追加：全セグメントを1本に連結（順序は読み込み順）
+          officialRouteFlat = [];
+          officialSegments.forEach(seg => { officialRouteFlat.push(...seg); });
         });
       });
     }
+    // ★追加：ルート上で最も近い頂点インデックスを返す
+function nearestIndexOnRoute(pt/* [lat,lng] */){
+  if (!officialRouteFlat.length) return 0;
+  let best = 0, bestD = Infinity;
+  for (let i=0;i<officialRouteFlat.length;i++){
+    const d = distanceMeters(pt, officialRouteFlat[i]);
+    if (d < bestD){ bestD = d; best = i; }
+  }
+  return best;
+}
+
+// ★追加：現在の「出発→目的地」または「#i-1 → #i」をハイライト
+function updateLegHighlight(){
+  if (!destinations.length || !officialRouteFlat.length) return;
+
+  // どの区間を描くか決定
+  let startIdx, endIdx;
+  if (current === 0){
+    // ルートの先頭 → #1
+    startIdx = 0;
+    endIdx   = nearestIndexOnRoute([destinations[0].lat, destinations[0].lng]);
+  } else {
+    // #i → #i+1
+    const prev = destinations[current-1];
+    const now  = destinations[current];
+    startIdx = nearestIndexOnRoute([prev.lat, prev.lng]);
+    endIdx   = nearestIndexOnRoute([now.lat,  now.lng]);
+  }
+
+  // 取り出し（方向に合わせてスライス）
+  let seg;
+  if (startIdx <= endIdx) seg = officialRouteFlat.slice(startIdx, endIdx+1);
+  else                    seg = officialRouteFlat.slice(endIdx, startIdx+1).reverse();
+
+  // 既存ハイライトを消してから描画
+  if (legHighlight) { map.removeLayer(legHighlight); legHighlight = null; }
+  if (seg.length >= 2){
+    legHighlight = L.polyline(seg, { color:'#ff2970', weight:7, opacity:0.9 }).addTo(map);
+  }
+}
 
     function fitAll(){
       const b = L.latLngBounds([]);
       if(officialRouteGroup.getLayers().length) b.extend(officialRouteGroup.getBounds());
       if(plannedLayer) b.extend(plannedLayer.getBounds());
       if(destMarkers.length) b.extend(L.featureGroup(destMarkers).getBounds());
+      if (legHighlight) b.extend(legHighlight.getBounds()); // ★追加：ハイライトも範囲に
       if(b.isValid()) map.fitBounds(b, {padding:[20,20]});
     }
 
@@ -198,6 +249,7 @@
       $('#counter').textContent = `#${destinations.length?current+1:0} / ${destinations.length}`;
       $('#btnPrev').disabled = current<=0;
       $('#btnNext').disabled = current>=destinations.length-1;
+      updateLegHighlight(); // ★追加：表示区間を更新
     }
 
     // --- GPS ---
