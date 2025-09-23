@@ -11,6 +11,8 @@
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.min.js"></script>
+
 
   <!-- CSV読込 -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
@@ -44,9 +46,10 @@
       <button class="btn" id="btnGPS">GPS開始</button>
       <button class="btn" id="btnStop" disabled>停止</button>
       <label class="small">到着半径 <input type="number" id="radius" value="50" style="width:4.5em"> m</label>
-    </div>
+      <label class="small"><input type="checkbox" id="chkFollow" checked> 中央固定（追従）</label>
+      <label class="small"><input type="checkbox" id="chkHeading" checked> 矢印＝進行方向</label>
+    </div>  
     <div class="small" id="status">初期化中…</div>
-  </div>
 
   <script>
   // すべて DOM 構築後に実行（addEventListener の null エラー対策）
@@ -64,6 +67,24 @@
     const map = L.map('map', {zoomControl:true}).setView([35.0,135.87], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+    // 矢印アイコン（SVGデータURL）
+    const userIcon = L.icon({
+      iconUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <defs><filter id="s"><feDropShadow dx="0" dy="1" stdDeviation="1" flood-opacity="0.4"/></filter></defs>
+          <g filter="url(#s)">
+            <circle cx="32" cy="32" r="9" fill="#fff"/>
+            <polygon points="32,6 44,34 32,28 20,34" fill="#007aff"/>
+          </g>
+        </svg>`
+      ),
+      iconSize: [44,44],
+      iconAnchor: [22,22]
+    });
+
+let userMarker = null, userAccCircle = null;
+let followMode = true, rotateToHeading = true;
+let lastLatLng = null, lastHeading = 0;
 
     // 正規ルート（MultiLine対応）
     const officialRouteGroup = L.featureGroup().addTo(map);
@@ -106,6 +127,15 @@
     const setStatus = (t)=> $('#status').textContent = t;
 
     // ====== イベント ======
+    on('#chkFollow','change', e=>{
+      followMode = e.target.checked;
+      if (followMode && lastLatLng) map.setView(lastLatLng, map.getZoom(), {animate:false});
+    });
+    on('#chkHeading','change', e=>{
+      rotateToHeading = e.target.checked;
+      if (userMarker && userMarker.setRotationAngle) userMarker.setRotationAngle(rotateToHeading ? lastHeading : 0);
+    });
+
     on('#btnFit','click', fitAll);
     on('#btnPrev','click', ()=> moveIndex(-1));
     on('#btnNext','click', ()=> moveIndex(1));
@@ -215,6 +245,13 @@ function updateLegHighlight(){
     startIdx = nearestIndexOnRoute([prev.lat, prev.lng]);
     endIdx   = nearestIndexOnRoute([now.lat,  now.lng]);
   }
+  function bearing(a, b){ // a=[lat,lng], b=[lat,lng] → 0..360°
+  const toRad = d => d*Math.PI/180, toDeg = r => r*180/Math.PI;
+  const φ1 = toRad(a[0]), φ2 = toRad(b[0]), Δλ = toRad(b[1]-a[1]);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+  }
 
   // 取り出し（方向に合わせてスライス）
   let seg;
@@ -276,21 +313,50 @@ function updateLegHighlight(){
     }
 
     function onPos(pos){
-      const {latitude:lat, longitude:lng, accuracy} = pos.coords;
-      liveTrack.addLatLng([lat,lng]);
+  const { latitude:lat, longitude:lng, accuracy, heading:h } = pos.coords;
+  const curr = [lat, lng];
 
-      // 到着判定
-      const cur = destinations[current];
-      if(cur){
-        const d = distanceMeters([lat,lng], [cur.lat,cur.lng]);
-        const rr = parseFloat($('#radius').value)||50;
-        setStatus(`精度±${Math.round(accuracy)}m / 目的地まで ${Math.round(d)}m`);
-        if(d <= rr){
-          ping();
-          showArrive(cur);
-          if(current < destinations.length-1){ current++; updateCounter(); }
-        }
-      }
+  // ユーザー位置マーカー＆精度円
+  if (!userMarker) {
+    userMarker = L.marker(curr, { icon:userIcon, rotationAngle:0, rotationOrigin:'center' }).addTo(map);
+    userAccCircle = L.circle(curr, { radius: accuracy||0, color:'#2b8', weight:1, fillOpacity:0.07 }).addTo(map);
+  } else {
+    userMarker.setLatLng(curr);
+    if (userAccCircle) userAccCircle.setLatLng(curr).setRadius(accuracy||0);
+  }
+
+  // 進行方向（端末が出す heading を優先。無ければ前回位置から算出）
+  let hdg = Number.isFinite(h) ? h : (lastLatLng ? bearing(lastLatLng, curr) : lastHeading||0);
+  if (rotateToHeading && userMarker.setRotationAngle) userMarker.setRotationAngle(hdg);
+  lastHeading = hdg;
+  lastLatLng = curr;
+
+  // 追従（常に中央へ）
+  if (followMode) map.setView(curr, map.getZoom(), {animate:false});
+
+  // 実走軌跡を延ばす
+  liveTrack.addLatLng(curr);
+
+  // 到着判定（既存ロジック）
+  const cur = destinations[current];
+  if (cur) {
+    const d = distanceMeters(curr, [cur.lat, cur.lng]);
+    const rr = parseFloat($('#radius').value) || 50;
+    setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m`);
+    if (d <= rr) {
+      ping();
+      showArrive(cur);
+      if (current < destinations.length-1) { current++; updateCounter(); }
+    }
+  }
+
+  // 逸脱チェック（必要なら）
+  if (officialSegments.length) {
+    const dist = minDistanceToRoute(curr);
+    // if (dist > 120) setStatus(`正規ルートから ${Math.round(dist)}m 離れています`);
+  }
+}
+
 
       // 逸脱チェック（任意）：正規ルートがある場合
       if(officialSegments.length){
