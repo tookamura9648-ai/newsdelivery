@@ -1,13 +1,17 @@
 import { AssistFlags } from './assistFlags.js';
 import { announce } from './voice.js';
+import { voiceEngine } from './voice.js'; // ← 追加
 import { Vibe } from './vibe.js';
 import { haversine, turnDirection } from './geometry.js';
 
 export class Announcer {
-  constructor(route, getClosestIndex){ this.route=route; this.getIdx=getClosestIndex;
+  constructor(route, getClosestIndex){
+    this.route=route; this.getIdx=getClosestIndex;
     this.lastOffRouteAt=0; this.wasOffRoute=false; this.lastTurnIdx=-1; this.lastArriveIdx=-1;
   }
-  onUserGestureInit(){ try { window.voiceEngine?.initOnceViaUserGesture(); } catch{} }
+  onUserGestureInit(){
+    try { voiceEngine.initOnceViaUserGesture(); } catch{}
+  }
   onGPS(pos){
     if (!this.route?.length) return;
     const idx=this.getIdx(pos); const nextIdx=Math.min(idx+1, this.route.length-1); const prevIdx=Math.max(idx-1,0);
@@ -25,7 +29,7 @@ export class Announcer {
       if (dir>0){ announce('turn-right', { distanceM: dToNext, nextName: next.name }); Vibe.rightTurn(); this.lastTurnIdx=nextIdx; }
       else if (dir<0){ announce('turn-left',  { distanceM: dToNext, nextName: next.name }); Vibe.leftTurn();  this.lastTurnIdx=nextIdx; }
     }
-    // 逸脱（簡易: 次点までの距離で代用）
+    // 逸脱（簡易）
     const off = dToNext > AssistFlags.OFF_ROUTE_WARN_M;
     const now = Math.floor(Date.now()/1000);
     if (off){
@@ -38,3 +42,5 @@ export class Announcer {
     }
   }
 }
+
+
