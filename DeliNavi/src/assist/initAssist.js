@@ -1,6 +1,7 @@
 import { mountAssistPanel } from './assistPanel.js';
 import { Announcer } from './announcer.js';
 import { voiceEngine } from './voice.js'; // ← 追加（グローバル経由に頼らない）
+import { unlockVibe } from './vibe.js';     // ← 追加
 
 let announcer = null;
 
@@ -33,16 +34,15 @@ async function loadRoutePoints(){
 }
 
 export async function initAssist(){
-  // DOM 準備後に実行（位置によらず安全）
+  // DOM 準備後…
   if (document.readyState === 'loading'){
     await new Promise(res => document.addEventListener('DOMContentLoaded', res, { once:true }));
   }
 
-  // パネル生成（z-index付き、後述のCSS不要）
   mountAssistPanel();
 
-  // iOS の音声解錠：最初のタップ/クリックで解錠（import済みの実体を呼ぶ）
-  const unlock = ()=>{ try{ voiceEngine.initOnceViaUserGesture(); } catch(e) { console.warn(e); } };
+  // ★最初のタップ/クリックで「音声＋バイブ」を解錠
+  const unlock = () => { try { voiceEngine.initOnceViaUserGesture(); } catch{}; unlockVibe(); };
   window.addEventListener('click', unlock, { once:true, capture:true });
   window.addEventListener('touchstart', unlock, { once:true, capture:true });
 
@@ -74,5 +74,6 @@ if (!window.__DN_INIT_CALLED__){
   window.__DN_INIT_CALLED__ = true;
   initAssist().catch(err => console.error('[DeliNavi] initAssist error', err));
 }
+
 
 
