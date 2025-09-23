@@ -1,5 +1,6 @@
 import { mountAssistPanel } from './assistPanel.js';
 import { Announcer } from './announcer.js';
+import { voiceEngine } from './voice.js'; // ← 追加（グローバル経由に頼らない）
 
 let announcer = null;
 
@@ -14,7 +15,7 @@ function getClosestIndexFactory(route){
   };
 }
 
-// official-route.geojson から単純に折れ点列を拾う（MultiLineString/LineString対応）
+// official-route.geojson から折れ点を抽出（LineString / MultiLineString対応）
 async function loadRoutePoints(){
   const res = await fetch('./assets/routes/official-route.geojson', { cache:'no-store' });
   const gj = await res.json();
@@ -22,8 +23,7 @@ async function loadRoutePoints(){
   const pushLine = (coords)=> coords.forEach(([lng,lat])=> pts.push({lat, lng}));
   if (gj.type==='FeatureCollection'){
     for (const f of gj.features){
-      const g = f.geometry;
-      if (!g) continue;
+      const g = f.geometry; if (!g) continue;
       if (g.type==='LineString') pushLine(g.coordinates);
       if (g.type==='MultiLineString') g.coordinates.forEach(pushLine);
     }
@@ -33,35 +33,46 @@ async function loadRoutePoints(){
 }
 
 export async function initAssist(){
+  // DOM 準備後に実行（位置によらず安全）
+  if (document.readyState === 'loading'){
+    await new Promise(res => document.addEventListener('DOMContentLoaded', res, { once:true }));
+  }
+
+  // パネル生成（z-index付き、後述のCSS不要）
   mountAssistPanel();
 
-  // iOSの音声解錠：最初のタップ/クリックで解錠
-  const unlock = ()=>{ try{ window.voiceEngine?.initOnceViaUserGesture(); }catch{} };
+  // iOS の音声解錠：最初のタップ/クリックで解錠（import済みの実体を呼ぶ）
+  const unlock = ()=>{ try{ voiceEngine.initOnceViaUserGesture(); } catch(e) { console.warn(e); } };
   window.addEventListener('click', unlock, { once:true, capture:true });
   window.addEventListener('touchstart', unlock, { once:true, capture:true });
 
   // ルート読み込み
   const route = await loadRoutePoints();
-  if (!route.length) { console.warn('route empty'); return; }
+  if (!route.length) { console.warn('[DeliNavi] route empty'); return; }
+
   announcer = new Announcer(route, getClosestIndexFactory(route));
 
-  // 他の場所から呼べるように公開（既存のGPS処理とつなぐ）
+  // 既存GPSからも呼べるように公開
   window.__DN_onGpsUpdate = (pos)=> announcer?.onGPS(pos);
 
-  // 既存で watchPosition がない場合の簡易ウォッチ（あるなら不要）
+  // もし既存の watchPosition がない場合だけ簡易ウォッチ
   if (!window.__DN_ALREADY_WATCHING__){
     try{
       navigator.geolocation.watchPosition(p=>{
         const pos={ lat:p.coords.latitude, lng:p.coords.longitude };
-        window.__DN_onGpsUpdate && window.__DN_onGpsUpdate(pos);
+        window.__DN_onGpsUpdate?.(pos);
       }, e=>console.warn('GPS error', e), { enableHighAccuracy:true, maximumAge:1000, timeout:10000 });
       window.__DN_ALREADY_WATCHING__ = true;
     }catch(e){ console.warn(e); }
   }
+
+  console.log('[DeliNavi] Assist initialized');
 }
 
-// 自動起動（index.html から <script type="module" src="./assist/initAssist.js"> でもOK）
+// 自動起動（DOM後に動くよう await 済）
 if (!window.__DN_INIT_CALLED__){
   window.__DN_INIT_CALLED__ = true;
-  initAssist();
+  initAssist().catch(err => console.error('[DeliNavi] initAssist error', err));
 }
+
+
