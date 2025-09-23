@@ -1,5 +1,7 @@
 import { AssistFlags, setAssistFlag } from './assistFlags.js';
 import { voiceEngine } from './voice.js';
+import { unlockVibe } from './vibe.js';     // ← 追加
+
 
 export function mountAssistPanel(){
   const wrap = document.createElement('div');
@@ -22,9 +24,11 @@ export function mountAssistPanel(){
 
   document.getElementById('dn-test').addEventListener('click', ()=>{
     voiceEngine.initOnceViaUserGesture();
+    unlockVibe();                           // ← 追加
     voiceEngine.speak('テストです。右に曲がります。');
     if ('vibrate' in navigator) navigator.vibrate([150,100,150]);
   });
 }
+
 
 
