@@ -58,6 +58,7 @@
     // ====== 設定（相対パスにしてあります）======
     const CSV_URL = './assets/data/points.csv'; // name,lat,lng[,img]
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
+    const SHOW_PLANNED_LINE = false; // ← 青の破線（CSV順の予定線）を非表示にする
 
     // ====== 変数 ======
     const map = L.map('map', {zoomControl:true}).setView([35.0,135.87], 13);
@@ -139,8 +140,11 @@
           .bindTooltip(`${i+1}`, {permanent:true, direction:'top'});
         destMarkers.push(m);
       });
-      plannedLayer = L.polyline(destinations.map(d=>[d.lat,d.lng]), {color:'#1e6bff', weight:3, dashArray:'6 6'}).addTo(map);
-
+      //plannedLayer = L.polyline(destinations.map(d=>[d.lat,d.lng]), {color:'#1e6bff', weight:3, dashArray:'6 6'}).addTo(map);
+      if (SHOW_PLANNED_LINE) {
+    plannedLayer = L.polyline(destinations.map(d=>[d.lat,d.lng]),
+      { color:'#1e6bff', weight:3, dashArray:'6 6' }).addTo(map);
+}
       current = 0;
       updateCounter();
       $('#btnNext').disabled = destinations.length<=1;
