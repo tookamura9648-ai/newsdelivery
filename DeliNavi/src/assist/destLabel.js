@@ -1,5 +1,5 @@
-// 次の目的地ラベル（CSV → 画面表示）＋ ドラッグ移動＆四隅スナップ
-// 推奨CSV: assets/data/points.csv（id,name,address,note,lat,lng）
+// 次の目的地ラベル（CSV → 表示）＋ドラッグ移動＆四隅スナップ
+// 追加: ①GPS初回Fix時に“現在地より前”を既訪問扱い ②手動「次へ」API(window.DN_destLabelNext)
 import { AssistFlags } from './assistFlags.js';
 import { haversine } from './geometry.js';
 
@@ -7,15 +7,10 @@ function parseCSV(text){
   const rows=[]; let i=0, cur='', inQ=false, row=[];
   while(i<text.length){
     const c=text[i];
-    if(inQ){
-      if(c==='\"'){ if(text[i+1]==='\"'){cur+='\"'; i++;} else {inQ=false;} }
-      else cur+=c;
-    }else{
-      if(c==='\"'){ inQ=true; }
-      else if(c===','){ row.push(cur); cur=''; }
-      else if(c==='\n' || c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(cur); rows.push(row); row=[]; cur=''; }
-      else cur+=c;
-    }
+    if(inQ){ if(c==='\"'){ if(text[i+1]==='\"'){cur+='\"'; i++;} else inQ=false; } else cur+=c; }
+    else{ if(c==='\"') inQ=true; else if(c===','){ row.push(cur); cur=''; }
+      else if(c==='\n'||c==='\r'){ if(c==='\r'&&text[i+1]==='\n') i++; row.push(cur); rows.push(row); row=[]; cur=''; }
+      else cur+=c; }
     i++;
   }
   row.push(cur); rows.push(row);
@@ -44,7 +39,6 @@ function headerIndexMap(headers){
 function readParam(name){ return new URLSearchParams(location.search).get(name); }
 
 function applyDock(card, dock){
-  // dock: 'tl'|'tr'|'bl'|'br'|'free'
   card.dataset.dock = dock;
   card.style.left = card.style.right = card.style.top = card.style.bottom = '';
   const pad = 12;
@@ -71,25 +65,21 @@ function createCard(){
     font-family:system-ui,-apple-system,Segoe UI,Roboto;
   `;
   wrap.innerHTML = `
-    <div id="dn-dest-grip"
-         style="position:absolute; right:6px; top:6px; width:22px; height:22px;
-                border-radius:6px; background:#eef2f4; display:flex; align-items:center; justify-content:center;
-                font-size:13px; cursor:move; user-select:none; touch-action:none; line-height:1">↕</div>
-    <button id="dn-dest-snap"
-            title="位置を角にスナップ"
-            style="position:absolute; right:34px; top:6px; width:22px; height:22px;
-                   border-radius:6px; border:1px solid #cfd8dc; background:#f7fbfd; cursor:pointer">◧</button>
+    <div id="dn-dest-grip" style="position:absolute; right:6px; top:6px; width:22px; height:22px;
+      border-radius:6px; background:#eef2f4; display:flex; align-items:center; justify-content:center;
+      font-size:13px; cursor:move; user-select:none; touch-action:none; line-height:1">↕</div>
+    <button id="dn-dest-snap" title="位置を角にスナップ" style="position:absolute; right:34px; top:6px; width:22px; height:22px;
+      border-radius:6px; border:1px solid #cfd8dc; background:#f7fbfd; cursor:pointer">◧</button>
     <div id="dn-dest-address" style="font-size:14px; line-height:1.25; margin-bottom:6px; word-break:break-word;"></div>
     <div id="dn-dest-name" style="font-size:28px; line-height:1.15; letter-spacing:.15em; font-weight:600; margin:2px 0 6px;"></div>
     <div id="dn-dest-note" style="font-size:14px; opacity:.85;"></div>
   `;
   document.body.appendChild(wrap);
 
-  // 初期位置：URL ?destPos=tl|tr|bl|br|free → localStorage → 既定 'tr'
   const initDock = readParam('destPos') || localStorage.getItem('dnDestDock') || 'tr';
   applyDock(wrap, initDock);
 
-  // ドラッグ移動（free で保存）
+  // ドラッグ
   const grip = wrap.querySelector('#dn-dest-grip');
   grip.addEventListener('pointerdown', (ev)=>{
     ev.preventDefault(); grip.setPointerCapture(ev.pointerId);
@@ -104,12 +94,12 @@ function createCard(){
       localStorage.setItem('dnDestX', String(x));
       localStorage.setItem('dnDestY', String(y));
     };
-    const onUp = (e)=>{ grip.releasePointerCapture(ev.pointerId); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+    const onUp = ()=>{ grip.releasePointerCapture(ev.pointerId); window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
   });
 
-  // 角スナップ（◧ボタンで tl → tr → br → bl → tl…）
+  // 四隅スナップ
   const order = ['tl','tr','br','bl'];
   wrap.querySelector('#dn-dest-snap').addEventListener('click', ()=>{
     const cur = wrap.dataset.dock || 'tr';
@@ -170,28 +160,82 @@ export async function initDestLabel(routePoints, getClosestIndex){
   }
 
   const card = createCard();
-  updateCard(card, points[0]);
+  let lastHereIdx = 0;
+  let cursorIdx = 0; // 直近に表示した points の index
+
+  const pickNext = (hereIdx)=>{
+    // まだ訪問していない中で hereIdx 以降の最初 → 無ければ最初の未訪問 → 最後
+    return points.findIndex(p=>!p._visited && p._routeIndex>=hereIdx)
+        ?? points.findIndex(p=>!p._visited);
+  };
+  const showByIndex = (i)=>{
+    if (i<0) i = points.length-1;
+    if (i>=points.length) i = points.length-1;
+    cursorIdx = i;
+    updateCard(card, points[cursorIdx]);
+  };
+
+  // ★“次へ” API（既存の次へボタンから呼んでください）
+  window.DN_destLabelNext = function(){
+    // 現在表示中を訪問済みにして、次候補を表示
+    points[cursorIdx]._visited = true;
+    const nxt = points.findIndex(p=>!p._visited && p._routeIndex>=lastHereIdx);
+    const fallback = points.findIndex(p=>!p._visited);
+    showByIndex(nxt>=0 ? nxt : (fallback>=0 ? fallback : points.length-1));
+  };
+
+  // 初期表示
+  showByIndex(0);
 
   // GPSチェイン
   const prev = window.__DN_onGpsUpdate;
+  let firstFixDone = false;
   window.__DN_onGpsUpdate = (pos)=>{
     try{
       const hereIdx = getClosestIndex(pos);
-      let next = points.find(p=>!p._visited && p._routeIndex>=hereIdx) || points.find(p=>!p._visited) || points[points.length-1];
-      if (Number.isFinite(next.lat)&&Number.isFinite(next.lng)){
-        const d = haversine(pos, {lat:next.lat, lng:next.lng});
-        if (d<=AssistFlags.ARRIVE_RADIUS_M){
-          next._visited = true;
-          next = points.find(p=>!p._visited && p._routeIndex>=hereIdx) || points.find(p=>!p._visited) || next;
+      lastHereIdx = hereIdx;
+
+      // ★GPS初回Fix：現在地より前のポイントは既訪問にしてスキップ
+      if (!firstFixDone){
+        for (const p of points){
+          if (Number.isFinite(p._routeIndex) && p._routeIndex < hereIdx) p._visited = true;
         }
-      } else {
-        if (hereIdx >= next._routeIndex) next._visited = true;
+        firstFixDone = true;
+        const i0 = pickNext(hereIdx);
+        if (i0 !== -1) showByIndex(i0);
       }
-      updateCard(card, next);
+
+      // 到着判定で自動進行
+      let nextIdx = points.findIndex(p=>!p._visited && p._routeIndex>=hereIdx);
+      if (nextIdx === -1) nextIdx = points.findIndex(p=>!p._visited);
+      if (nextIdx !== -1){
+        const next = points[nextIdx];
+        if (Number.isFinite(next.lat)&&Number.isFinite(next.lng)){
+          const d = haversine(pos, {lat:next.lat, lng:next.lng});
+          if (d<=AssistFlags.ARRIVE_RADIUS_M){
+            points[nextIdx]._visited = true;
+            // 次の候補を即表示
+            let nxt = points.findIndex(p=>!p._visited && p._routeIndex>=hereIdx);
+            if (nxt === -1) nxt = points.findIndex(p=>!p._visited);
+            if (nxt !== -1) showByIndex(nxt);
+          } else {
+            // まだ到着していないなら現在の next を表示
+            showByIndex(nextIdx);
+          }
+        } else {
+          // 緯度経度なし：インデックスで前進
+          if (hereIdx >= next._routeIndex){ points[nextIdx]._visited = true; }
+          let nxt = points.findIndex(p=>!p._visited && p._routeIndex>=hereIdx);
+          if (nxt === -1) nxt = points.findIndex(p=>!p._visited);
+          if (nxt !== -1) showByIndex(nxt);
+        }
+      }
     }catch(e){ console.warn('[DeliNavi] dest label update error', e); }
+
     if (typeof prev==='function') prev(pos);
   };
 
-  console.log('[DeliNavi] DestLabel initialized (drag & snap enabled)');
+  console.log('[DeliNavi] DestLabel initialized (drag/snap + GPS初期スキップ + 手動NEXT)');
 }
+
 
