@@ -184,6 +184,13 @@ export async function initDestLabel(routePoints, getClosestIndex){
     showByIndex(nxt>=0 ? nxt : (fallback>=0 ? fallback : points.length-1));
   };
 
+  // 前回版の変数名と同じ作用域に置くこと（cursorIdx, points, showByIndex を利用）
+window.DN_destLabelPrev = function(){
+  // 1つ前を表示（既訪問フラグは戻さず表示だけ）
+  const i = Math.max(0, cursorIdx - 1);
+  showByIndex(i);
+};
+
   // 初期表示
   showByIndex(0);
 
@@ -237,5 +244,6 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
   console.log('[DeliNavi] DestLabel initialized (drag/snap + GPS初期スキップ + 手動NEXT)');
 }
+
 
 
