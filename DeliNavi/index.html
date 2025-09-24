@@ -249,14 +249,21 @@
       if(b.isValid()) map.fitBounds(b, {padding:[20,20]});
     }
 
-    // ====== 目的地インデックス操作 ======
     function moveIndex(delta){
-      const next = Math.min(Math.max(current+delta, 0), destinations.length-1);
-      if(next===current) return;
-      current = next;
-      updateCounter();
-      map.panTo([destinations[current].lat, destinations[current].lng]);
-    }
+  const next = Math.min(Math.max(current + delta, 0), destinations.length - 1);
+  if (next === current) return;
+  current = next;
+  updateCounter();
+  map.panTo([destinations[current].lat, destinations[current].lng]);
+
+  // ★ 追加：ラベルも進める／戻す
+  if (delta > 0) {
+    window.DN_destLabelNext && window.DN_destLabelNext();
+  } else if (delta < 0) {
+    window.DN_destLabelPrev && window.DN_destLabelPrev();   // ← おまけ実装した場合だけ
+  }
+}
+
 
     function updateCounter(){
       $('#counter').textContent = `#${destinations.length?current+1:0} / ${destinations.length}`;
