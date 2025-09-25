@@ -2,6 +2,7 @@
 // 追加: ①GPS初回Fix時に“現在地より前”を既訪問扱い ②手動「次へ」API(window.DN_destLabelNext)
 import { AssistFlags } from './assistFlags.js';
 import { haversine } from './geometry.js';
+import './focusMarkers.js'; // ← 追加（window.* API を定義）
 
 function parseCSV(text){
   const rows=[]; let i=0, cur='', inQ=false, row=[];
@@ -244,6 +245,7 @@ window.DN_destLabelPrev = function(){
 
   console.log('[DeliNavi] DestLabel initialized (drag/snap + GPS初期スキップ + 手動NEXT)');
 }
+
 
 
 
