@@ -39,6 +39,22 @@ window.DN_registerDestinationMarkers = function(markersArray, map){
   _map = map || _map;
   if (readOnlyNext()) applyFocus(_curr >= 0 ? _curr : 0);
 };
+
+// 近いマーカーを自動で探してフォーカス（順番不一致対策）
+window.DN_focusDestByLatLng = function(lat, lng){
+  if (!_markers.length) return;
+  let best = 0, bestD = Infinity;
+  for (let i=0;i<_markers.length;i++){
+    const ll = _markers[i].getLatLng && _markers[i].getLatLng();
+    if (!ll) continue;
+    const dx = ll.lat - lat, dy = ll.lng - lng;
+    const d = dx*dx + dy*dy;          // 平面近似で十分
+    if (d < bestD){ bestD = d; best = i; }
+  }
+  applyFocus(best);
+};
+
 window.DN_focusDest = function(i){ applyFocus(i); };
 window.DN_showAllDests = function(){ localStorage.setItem('onlyNext','0'); _markers.forEach(showLayer); };
 window.DN_hideOthers  = function(){ localStorage.setItem('onlyNext','1'); if (_curr>=0) applyFocus(_curr); };
+
