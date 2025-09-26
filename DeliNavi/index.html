@@ -208,6 +208,12 @@
       $('#btnNext').disabled = destinations.length<=1;
     }
 
+    // 例：地図とマーカー作成が終わった直後
+const markers = [];
+  map.eachLayer(l => { if (l instanceof L.Marker || l.getLatLng) markers.push(l); });
+  window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(markers, map);
+
+
     // ====== 公式ルート（MultiLine / FeatureCollection 対応） ======
     async function loadOfficialRoute(){
       const res = await fetch(OFFICIAL_ROUTE_URL + '?v=' + Date.now(), {cache:'no-store'});
