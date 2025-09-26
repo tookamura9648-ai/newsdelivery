@@ -170,11 +170,20 @@ export async function initDestLabel(routePoints, getClosestIndex){
         ?? points.findIndex(p=>!p._visited);
   };
   const showByIndex = (i)=>{
-    if (i<0) i = points.length-1;
-    if (i>=points.length) i = points.length-1;
-    cursorIdx = i;
-    updateCard(card, points[cursorIdx]);
-  };
+  if (i<0) i = points.length-1;
+  if (i>=points.length) i = points.length-1;
+  cursorIdx = i;
+  updateCard(card, points[cursorIdx]);
+
+- window.DN_focusDest && window.DN_focusDest(cursorIdx);
++ const p = points[cursorIdx];
++ if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) {
++   window.DN_focusDestByLatLng
++     ? window.DN_focusDestByLatLng(p.lat, p.lng)   // 近いマーカーを自動特定
++     : (window.DN_focusDest && window.DN_focusDest(cursorIdx));
++ }
+};
+
 
   // ★“次へ” API（既存の次へボタンから呼んでください）
   window.DN_destLabelNext = function(){
@@ -245,6 +254,7 @@ window.DN_destLabelPrev = function(){
 
   console.log('[DeliNavi] DestLabel initialized (drag/snap + GPS初期スキップ + 手動NEXT)');
 }
+
 
 
 
