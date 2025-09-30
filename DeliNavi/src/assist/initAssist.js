@@ -49,6 +49,9 @@ export async function initAssist(){
   announcer = new Announcer(route, getClosestIndexFactory(route));
   await initDestLabel(route, getClosestIndexFactory(route));  // ← 追加
 
+  // ★追加（HUDがルートを参照できるように共有）
+  window.__DN_route = route;
+  window.__DN_getClosestIndex = getClosestIndexFactory(route);
 
   // 他の場所から呼べるように公開（既存のGPS処理とつなぐ）
   window.__DN_onGpsUpdate = (pos)=> announcer?.onGPS(pos);
@@ -70,6 +73,7 @@ if (!window.__DN_INIT_CALLED__){
   window.__DN_INIT_CALLED__ = true;
   initAssist();
 }
+
 
 
 
