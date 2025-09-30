@@ -192,48 +192,61 @@ export async function initDestLabel(routePoints, getClosestIndex){
     return points[cursorIdx];
   };
 
-  // 初期表示
+    // 初期表示
   showByIndex(0);
 
   // GPSチェイン
   const prev = window.__DN_onGpsUpdate;
+  let firstFixDone = false;
+
   window.__DN_onGpsUpdate = function(pos){
     try{
       const hereIdx = getClosestIndex(pos);
       lastHereIdx = hereIdx;
 
-      // 初回：現在地より前を既訪問
-      if(!firstFixDone){
-        points.forEach(p=>{ if(Number.isFinite(p._routeIndex) && p._routeIndex<hereIdx) p._visited=true; });
-        firstFixDone=true;
-        const i0=findNextIndexFromHere(hereIdx); if(i0!==-1) showByIndex(i0);
+      // 初回：現在地より前を既訪問扱い
+      if (!firstFixDone){
+        for (let i=0; i<points.length; i++){
+          if (Number.isFinite(points[i]._routeIndex) && points[i]._routeIndex < hereIdx){
+            points[i]._visited = true;
+          }
+        }
+        firstFixDone = true;
+        const i0 = findNextIndexFromHere(hereIdx);
+        if (i0 !== -1) showByIndex(i0);
       }
 
       // 到着で自動進行
       let nextIdx = findNextIndexFromHere(hereIdx);
-      if(nextIdx!==-1){
-        const next=points[nextIdx];
-        const curPos={lat:pos.lat??pos.coords.latitude, lng:pos.lng??pos.coords.longitude};
-        if(Number.isFinite(next.lat)&&Number.isFinite(next.lng)){
-          const d=haversine(curPos,{lat:next.lat,lng:next.lng});
-          if(d<=AssistFlags.ARRIVE_RADIUS_M){
-            points[nextIdx]._visited=true;
-            const nxt=findNextIndexFromHere(hereIdx);
-            if(nxt!==-1) showByIndex(nxt);
-          }else{
+      if (nextIdx !== -1){
+        const next = points[nextIdx];
+        const curPos = { lat: pos.lat ?? pos.coords?.latitude, lng: pos.lng ?? pos.coords?.longitude };
+        if (Number.isFinite(next.lat) && Number.isFinite(next.lng)){
+          const d = haversine(curPos, {lat: next.lat, lng: next.lng});
+          if (d <= AssistFlags.ARRIVE_RADIUS_M){
+            points[nextIdx]._visited = true;
+            const nxt = findNextIndexFromHere(hereIdx);
+            if (nxt !== -1) showByIndex(nxt);
+          } else {
             showByIndex(nextIdx);
           }
-        }else{
-          if(hereIdx>=next._routeIndex) points[nextIdx]._visited=true;
-          const nxt2=findNextIndexFromHere(hereIdx); if(nxt2!==-1) showByIndex(nxt2);
+        } else {
+          if (hereIdx >= next._routeIndex){ points[nextIdx]._visited = true; }
+          const nxt2 = findNextIndexFromHere(hereIdx);
+          if (nxt2 !== -1) showByIndex(nxt2);
         }
       }
-    }catch(e){ console.warn('[DeliNavi] dest label update error', e); }
-    if (typeof prev==='function') prev(pos);
+    } catch(e) {
+      console.warn('[DeliNavi] dest label update error', e);
+    }
+
+    if (typeof prev === 'function') prev(pos);
   };
 
   console.log('[DeliNavi] DestLabel initialized');
 }
+
+
 
 
 
