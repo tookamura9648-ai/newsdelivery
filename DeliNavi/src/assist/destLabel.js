@@ -1,5 +1,6 @@
-// 次の目的地ラベル（CSV→表示）＋ドラッグ＆四隅スナップ
-// 追加: GPS初回で“現在地より前”を既訪問、手動NEXT、マーカー/HUD連動
+// 次の目的地ラベル（CSV→表示）＋ドラッグ移動＆四隅スナップ
+// 機能: ①順序は order/id 優先 ②GPS初回で現在地より前を既訪問 ③“次へ”で手動前進
+//       ④到着で自動前進 ⑤focusMarkers / rideHud と連動
 import { AssistFlags } from './assistFlags.js';
 import { haversine } from './geometry.js';
 
@@ -25,19 +26,34 @@ function parseCSV(text){
 function headerIndexMap(headers){
   const norm=s=>String(s||'').toLowerCase().replace(/\s/g,'');
   const map={}, al={
-    name:['name','氏名','お名前','利用者名'],
-    address:['address','住所','所在地'],
-    note:['note','備考','メモ','時間帯','区分'],
-    lat:['lat','latitude','緯度'],
-    lng:['lng','long','longitude','経度','経緯度'],
-    id:      ['id','番号','no'],
-    order:   ['order','順路','順番','配達順','seq','route']
+    name   : ['name','氏名','お名前','利用者名'],
+    address: ['address','住所','所在地'],
+    note   : ['note','備考','メモ','時間帯','区分'],
+    lat    : ['lat','latitude','緯度'],
+    lng    : ['lng','long','longitude','経度','経緯度'],
+    id     : ['id','番号','no'],
+    order  : ['order','順路','順番','配達順','seq','route'],
   };
   for (const k in al){
-    const hit=headers.findIndex(h=>norm(h)===norm(al[k][0]) || al[k].some(a=>norm(h)===norm(a)));
+    const hit = headers.findIndex(h => al[k].some(a => norm(h)===norm(a)));
     if (hit>=0) map[k]=hit;
   }
   return map;
+}
+// DMS(度分秒)でも10進に直す（普段はGoogleマップの10進をそのままでOK）
+function parseCoord(val, kind/*'lat'|'lng'*/){
+  if (val == null) return NaN;
+  if (typeof val === 'number') return val;
+  const s = String(val).trim();
+  if (/^-?\d+(\.\d+)?$/.test(s)) return parseFloat(s); // 既に10進
+  const m = s.match(/([NSEW])?\s*([0-9]{1,3})[^0-9]*([0-9]{1,2})?[^0-9]*([0-9]{1,2}(?:\.\d+)?)?\s*([NSEW])?/i);
+  if (!m) return NaN;
+  const hemi=(m[1]||m[5]||'').toUpperCase();
+  const deg=Number(m[2]||0), min=Number(m[3]||0), sec=Number(m[4]||0);
+  if (kind==='lat' && deg>90) return NaN;
+  if (kind==='lng' && deg>180) return NaN;
+  const sign = (hemi==='S'||hemi==='W') ? -1 : 1;
+  return sign*(deg + min/60 + sec/3600);
 }
 
 /* ===== UI ===== */
@@ -110,21 +126,22 @@ async function loadPoints(){
   if(rows.length<=1) return [];
   const headers=rows[0], m=headerIndexMap(headers);
   const idx=(k,f)=> (m[k]!=null?m[k]:f);
+
   const out=[];
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
     const ordRaw = (m.order!=null ? r[m.order] : (m.id!=null ? r[m.id] : ''));
-    const ordNum = Number.parseFloat(String(ordRaw).replace(/[^\d.\-]/g,'')); // 数値だけ抽出
+    const ordNum = Number.parseFloat(String(ordRaw).replace(/[^\d.\-]/g,''));
     out.push({
       id: m.id!=null ? r[m.id] : String(i),
       name: r[idx('name',0)]||'',
       address: r[idx('address',1)]||'',
       note: m.note!=null ? r[m.note] : '',
-      lat  : (m.lat!=null  ? (typeof parseCoord==='function' ? parseCoord(r[m.lat],'lat') : parseFloat(r[m.lat])) : NaN),
-      lng  : (m.lng!=null  ? (typeof parseCoord==='function' ? parseCoord(r[m.lng],'lng') : parseFloat(r[m.lng])) : NaN),
-      _seq: Number.isFinite(ordNum) ? ordNum : null,  // ← 追加：並び順の元
+      lat:  m.lat!=null ? parseCoord(r[m.lat],'lat') : NaN,
+      lng:  m.lng!=null ? parseCoord(r[m.lng],'lng') : NaN,
+      _seq: Number.isFinite(ordNum) ? ordNum : null, // 並び順の元（order/id）
       _routeIndex: Infinity,
-      _visited: false
+      _visited:false
     });
   }
   return out;
@@ -139,34 +156,33 @@ export async function initDestLabel(routePoints, getClosestIndex){
   const points = await loadPoints().catch(e=>{ console.warn('[DeliNavi] points.csv load error',e); return []; });
   if(!points.length){ console.warn('[DeliNavi] points.csv empty; dest label disabled'); return; }
 
-  // ルート順
-  // 並び順の決定：①order/id → ②ルート近傍 → ③CSVの並び
+  // 並び順: ①order/id → ②ルート沿い（緯度経度がある場合）→ ③CSV行順
   const hasExplicitOrder = points.every(p => p._seq != null);
-  if (hasExplicitOrder) {
-    // ① CSVの order（なければ id 数値）でソート
-    points.sort((a,b)=> (a._seq - b._seq));
-    points.forEach((p,i)=> p._routeIndex = i);
+  if (hasExplicitOrder){
+    points.sort((a,b)=> a._seq - b._seq);
+    points.forEach((p,i)=> p._routeIndex=i);
   } else {
-    // ② 位置情報があるならルート沿いの順序で
-    const hasGeo = points.some(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    const hasGeo = points.some(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lng));
     if (hasGeo){
       for (const p of points){
-        if (Number.isFinite(p.lat) && Number.isFinite(p.lng)){
-          p._routeIndex = getClosestIndex({lat:p.lat, lng:p.lng});
+        if(Number.isFinite(p.lat)&&Number.isFinite(p.lng)){
+          p._routeIndex = getClosestIndex({lat:p.lat,lng:p.lng});
         }
       }
       points.sort((a,b)=> a._routeIndex - b._routeIndex);
     } else {
-      // ③ 位置が無ければCSVの行順のまま
-      points.forEach((p,i)=> p._routeIndex = i);
+      points.forEach((p,i)=> p._routeIndex=i);
     }
+  }
+
   const card = createCard();
-  let lastHereIdx=0, cursorIdx=0, firstFixDone=false;
+  let lastHereIdx=0, cursorIdx=0;
 
   function showByIndex(i){
     if(i<0) i=0; if(i>=points.length) i=points.length-1;
     cursorIdx=i; updateCard(card, points[cursorIdx]);
-    // マーカー/HUD連動
+
+    // マーカー/HUD 連動（座標があれば座標優先）
     const p=points[cursorIdx];
     if(Number.isFinite(p.lat)&&Number.isFinite(p.lng)){
       if (typeof window.DN_focusDestByLatLng==='function') window.DN_focusDestByLatLng(p.lat,p.lng);
@@ -182,7 +198,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
     return b!==-1 ? b : -1;
   }
 
-  // “次へ”ボタン連動
+  // “次へ”ボタン用
   window.DN_destLabelNext = function(){
     if(!points.length) return null;
     points[cursorIdx]._visited = true;
@@ -192,7 +208,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
     return points[cursorIdx];
   };
 
-    // 初期表示
+  // 初期表示
   showByIndex(0);
 
   // GPSチェイン
@@ -204,46 +220,42 @@ export async function initDestLabel(routePoints, getClosestIndex){
       const hereIdx = getClosestIndex(pos);
       lastHereIdx = hereIdx;
 
-      // 初回：現在地より前を既訪問扱い
-      if (!firstFixDone){
-        for (let i=0; i<points.length; i++){
-          if (Number.isFinite(points[i]._routeIndex) && points[i]._routeIndex < hereIdx){
-            points[i]._visited = true;
-          }
-        }
-        firstFixDone = true;
-        const i0 = findNextIndexFromHere(hereIdx);
-        if (i0 !== -1) showByIndex(i0);
+      // 初回: 現在地より前を既訪問
+      if(!firstFixDone){
+        points.forEach(p=>{ if(Number.isFinite(p._routeIndex) && p._routeIndex<hereIdx) p._visited=true; });
+        firstFixDone=true;
+        const i0=findNextIndexFromHere(hereIdx); if(i0!==-1) showByIndex(i0);
       }
 
-      // 到着で自動進行
+      // 到着で自動前進
       let nextIdx = findNextIndexFromHere(hereIdx);
-      if (nextIdx !== -1){
-        const next = points[nextIdx];
-        const curPos = { lat: pos.lat ?? pos.coords?.latitude, lng: pos.lng ?? pos.coords?.longitude };
-        if (Number.isFinite(next.lat) && Number.isFinite(next.lng)){
-          const d = haversine(curPos, {lat: next.lat, lng: next.lng});
-          if (d <= AssistFlags.ARRIVE_RADIUS_M){
-            points[nextIdx]._visited = true;
-            const nxt = findNextIndexFromHere(hereIdx);
-            if (nxt !== -1) showByIndex(nxt);
-          } else {
+      if(nextIdx!==-1){
+        const next=points[nextIdx];
+        const curPos={lat:pos.lat??pos.coords?.latitude, lng:pos.lng??pos.coords?.longitude};
+        if(Number.isFinite(next.lat)&&Number.isFinite(next.lng)){
+          const d=haversine(curPos,{lat:next.lat,lng:next.lng});
+          if(d<=AssistFlags.ARRIVE_RADIUS_M){
+            points[nextIdx]._visited=true;
+            const nxt=findNextIndexFromHere(hereIdx);
+            if(nxt!==-1) showByIndex(nxt);
+          }else{
             showByIndex(nextIdx);
           }
-        } else {
-          if (hereIdx >= next._routeIndex){ points[nextIdx]._visited = true; }
-          const nxt2 = findNextIndexFromHere(hereIdx);
-          if (nxt2 !== -1) showByIndex(nxt2);
+        }else{
+          if(hereIdx>=next._routeIndex) points[nextIdx]._visited=true;
+          const nxt2=findNextIndexFromHere(hereIdx); if(nxt2!==-1) showByIndex(nxt2);
         }
       }
-    } catch(e) {
-      console.warn('[DeliNavi] dest label update error', e);
-    }
-
-    if (typeof prev === 'function') prev(pos);
+    }catch(e){ console.warn('[DeliNavi] dest label update error', e); }
+    if (typeof prev==='function') prev(pos);
   };
 
+  console.log('[DeliNavi] DestLabel initialized');
+}
+
+
   
+
 
 
 
