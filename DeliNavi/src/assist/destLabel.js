@@ -59,6 +59,12 @@ function parseCoord(val, kind/*'lat'|'lng'*/){
 /* ===== UI ===== */
 function readParam(name){ return new URLSearchParams(location.search).get(name); }
 
+function readBoolParam(name, def){
+  const v = readParam(name);
+  if (v == null) return def;
+  return v === '1' || v === 'true' || v === 'on';
+}
+
 function applyDock(card, dock){
   card.dataset.dock = dock;
   card.style.left = card.style.right = card.style.top = card.style.bottom = '';
@@ -152,10 +158,10 @@ export async function initDestLabel(routePoints, getClosestIndex){
   if(document.readyState==='loading'){
     await new Promise(res=>document.addEventListener('DOMContentLoaded',res,{once:true}));
   }
-
+　const AUTO_ADVANCE = readBoolParam('autoAdvance', false); // ★テスト中はOFF（?autoAdvance=1で再有効化）
   const points = await loadPoints().catch(e=>{ console.warn('[DeliNavi] points.csv load error',e); return []; });
   if(!points.length){ console.warn('[DeliNavi] points.csv empty; dest label disabled'); return; }
-
+  
   // 並び順: ①order/id → ②ルート沿い（緯度経度がある場合）→ ③CSV行順
   const hasExplicitOrder = points.every(p => p._seq != null);
   if (hasExplicitOrder){
@@ -234,15 +240,20 @@ export async function initDestLabel(routePoints, getClosestIndex){
         const curPos={lat:pos.lat??pos.coords?.latitude, lng:pos.lng??pos.coords?.longitude};
         if(Number.isFinite(next.lat)&&Number.isFinite(next.lng)){
           const d=haversine(curPos,{lat:next.lat,lng:next.lng});
-          if(d<=AssistFlags.ARRIVE_RADIUS_M){
-            points[nextIdx]._visited=true;
-            const nxt=findNextIndexFromHere(hereIdx);
-            if(nxt!==-1) showByIndex(nxt);
-          }else{
-            showByIndex(nextIdx);
-          }
-        }else{
-          if(hereIdx>=next._routeIndex) points[nextIdx]._visited=true;
+          + if (d <= AssistFlags.ARRIVE_RADIUS_M){
+   if (AUTO_ADVANCE){
+     points[nextIdx]._visited = true;
+     const nxt = findNextIndexFromHere(hereIdx);
+     if (nxt !== -1) showByIndex(nxt);
+   } else {
+     // 到着しても自動では進めず、表示だけ維持（手動「次へ」で進める）
+     showByIndex(nextIdx);
+   }
+ } else {
+   showByIndex(nextIdx);
+ }
+        }else{          
+          if (AUTO_ADVANCE && hereIdx >= next._routeIndex){ points[nextIdx]._visited = true; }
           const nxt2=findNextIndexFromHere(hereIdx); if(nxt2!==-1) showByIndex(nxt2);
         }
       }
@@ -255,6 +266,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
