@@ -243,8 +243,8 @@ export async function initDestLabel(routePoints, getClosestIndex){
     if (typeof prev === 'function') prev(pos);
   };
 
-  console.log('[DeliNavi] DestLabel initialized');
-}
+  
+
 
 
 
