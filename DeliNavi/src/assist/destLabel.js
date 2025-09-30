@@ -26,13 +26,13 @@ function parseCSV(text){
 function headerIndexMap(headers){
   const norm=s=>String(s||'').toLowerCase().replace(/\s/g,'');
   const map={}, al={
+    order  : ['order','順路','順番','配達順','seq','route'],
     name   : ['name','氏名','お名前','利用者名'],
     address: ['address','住所','所在地'],
     note   : ['note','備考','メモ','時間帯','区分'],
     lat    : ['lat','latitude','緯度'],
     lng    : ['lng','long','longitude','経度','経緯度'],
-    id     : ['id','番号','no'],
-    order  : ['order','順路','順番','配達順','seq','route'],
+    id     : ['id','番号','no'],    
   };
   for (const k in al){
     const hit = headers.findIndex(h => al[k].some(a => norm(h)===norm(a)));
@@ -266,6 +266,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
