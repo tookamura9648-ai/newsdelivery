@@ -140,18 +140,26 @@ export async function initDestLabel(routePoints, getClosestIndex){
   if(!points.length){ console.warn('[DeliNavi] points.csv empty; dest label disabled'); return; }
 
   // ルート順
-  const hasGeo = points.some(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lng));
-  if(hasGeo){
-    for(const p of points){
-      if(Number.isFinite(p.lat)&&Number.isFinite(p.lng)){
-        p._routeIndex = getClosestIndex({lat:p.lat,lng:p.lng});
+  // 並び順の決定：①order/id → ②ルート近傍 → ③CSVの並び
+  const hasExplicitOrder = points.every(p => p._seq != null);
+  if (hasExplicitOrder) {
+    // ① CSVの order（なければ id 数値）でソート
+    points.sort((a,b)=> (a._seq - b._seq));
+    points.forEach((p,i)=> p._routeIndex = i);
+  } else {
+    // ② 位置情報があるならルート沿いの順序で
+    const hasGeo = points.some(p => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    if (hasGeo){
+      for (const p of points){
+        if (Number.isFinite(p.lat) && Number.isFinite(p.lng)){
+          p._routeIndex = getClosestIndex({lat:p.lat, lng:p.lng});
+        }
       }
+      points.sort((a,b)=> a._routeIndex - b._routeIndex);
+    } else {
+      // ③ 位置が無ければCSVの行順のまま
+      points.forEach((p,i)=> p._routeIndex = i);
     }
-    points.sort((a,b)=>a._routeIndex-b._routeIndex);
-  }else{
-    points.forEach((p,i)=>p._routeIndex=i);
-  }
-
   const card = createCard();
   let lastHereIdx=0, cursorIdx=0, firstFixDone=false;
 
@@ -226,6 +234,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
   console.log('[DeliNavi] DestLabel initialized');
 }
+
 
 
 
