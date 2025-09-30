@@ -53,7 +53,7 @@
     hud.style.cssText = `
       position:fixed; inset:0; z-index:9800;
       display:none; align-items:center; justify-content:center; flex-direction:column;
-      background:#fafafa; color:#0b2f3a; font-family:system-ui,-apple-system,Segoe UI,Roboto;
+      background:#000; color:#fff; color:#0b2f3a; font-family:system-ui,-apple-system,Segoe UI,Roboto;
       user-select:none; touch-action:none;
     `;
     nameEl = document.createElement('div');
@@ -61,7 +61,7 @@
     arrow = document.createElementNS('http://www.w3.org/2000/svg','svg');
     arrow.setAttribute('width','220'); arrow.setAttribute('height','220'); arrow.setAttribute('viewBox','0 0 100 100');
     arrow.style.cssText = 'margin:8px 0; transform:rotate(0deg); transition:transform .08s linear;';
-    const g = document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('fill','#0b2f3a');
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g'); g.setAttribute('fill','#00e676'); // ビビッドな緑
     const p = document.createElementNS('http://www.w3.org/2000/svg','path'); p.setAttribute('d','M50 8 L70 48 H58 V92 H42 V48 H30 Z');
     g.appendChild(p); arrow.appendChild(g);
     distEl = document.createElement('div'); distEl.style.cssText = 'font-size:22px; font-weight:600; margin-top:6px;';
@@ -203,5 +203,6 @@
 
   document.addEventListener('DOMContentLoaded', ()=>{ ensureHud(); updateSubText(); }, { once:true });
 })();
+
 
 
