@@ -206,18 +206,41 @@ export async function initDestLabel(routePoints, getClosestIndex){
   let lastHereIdx=0, cursorIdx=0;
 
   function showByIndex(i){
-    if(i<0) i=0; if(i>=points.length) i=points.length-1;
-    cursorIdx=i; updateCard(card, points[cursorIdx]);
+  if (i < 0) i = 0;
+  if (i >= points.length) i = points.length - 1;
 
-    // マーカー/HUD 連動（座標があれば座標優先）
-    const p=points[cursorIdx];
-    if(Number.isFinite(p.lat)&&Number.isFinite(p.lng)){
-      if (typeof window.DN_focusDestByLatLng==='function') window.DN_focusDestByLatLng(p.lat,p.lng);
-      else if (typeof window.DN_focusDest==='function') window.DN_focusDest(cursorIdx);
-    } else if (typeof window.DN_focusDest==='function') {
-      window.DN_focusDest(cursorIdx);
-    }
+  const prevIdx = (typeof cursorIdx === 'number') ? cursorIdx : -1; // 現在のところ（直前表示）
+  cursorIdx = i;                                                    // 次のところ（新表示）
+
+  // ラベル表示を更新
+  updateCard(card, points[cursorIdx]);
+
+  // === マーカー表示（現在＋次）＆ HUD 連動 ===
+  const pCurr = (prevIdx >= 0) ? points[prevIdx] : null;
+  const pNext = points[cursorIdx];
+
+  // 1) マーカー：pair 指定できるならそれを優先
+  if (pCurr && Number.isFinite(pCurr.lat) && Number.isFinite(pCurr.lng)
+      && Number.isFinite(pNext.lat) && Number.isFinite(pNext.lng)
+      && typeof window.DN_focusPairByLatLng === 'function'){
+    window.DN_focusPairByLatLng(pCurr.lat, pCurr.lng, pNext.lat, pNext.lng);
+  } else if (typeof window.DN_focusPair === 'function' && prevIdx >= 0){
+    window.DN_focusPair(prevIdx, cursorIdx);
+  } else if (Number.isFinite(pNext.lat) && Number.isFinite(pNext.lng)
+             && typeof window.DN_focusDestByLatLng === 'function'){
+    // フォールバック：次だけ
+    window.DN_focusDestByLatLng(pNext.lat, pNext.lng);
+  } else if (typeof window.DN_focusDest === 'function'){
+    window.DN_focusDest(cursorIdx);
   }
+
+  // 2) HUD は従来通り“次の目的地”に合わせる
+  if (Number.isFinite(pNext.lat) && Number.isFinite(pNext.lng)
+      && typeof window.DN_focusDestByLatLng === 'function'){
+    window.DN_focusDestByLatLng(pNext.lat, pNext.lng);
+  }
+}
+
   function findNextIndexFromHere(hereIdx){
     const a=points.findIndex(p=>!p._visited && p._routeIndex>=hereIdx);
     if(a!==-1) return a;
@@ -287,6 +310,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
