@@ -125,33 +125,54 @@ function updateCard(card, rec){
 }
 
 /* ===== データ読込 ===== */
+/* ---------- データ読込 ---------- */
 async function loadPoints(){
-  const res=await fetch('./assets/data/points.csv',{cache:'no-store'});
-  if(!res.ok) throw new Error('points.csv not found');
-  const rows=parseCSV(await res.text()).filter(r=>r.length && r.some(x=>x!==''));
-  if(rows.length<=1) return [];
-  const headers=rows[0], m=headerIndexMap(headers);
-  const idx=(k,f)=> (m[k]!=null?m[k]:f);
+  const res = await fetch('./assets/data/points.csv', { cache:'no-store' });
+  if (!res.ok) throw new Error('points.csv not found');
+
+  const text = await res.text();
+  const rows = parseCSV(text).filter(r=>r.length && r.some(x=>x!==''));
+  if (rows.length<=1) return [];
+
+  const headers = rows[0];
+  const m = headerIndexMap(headers); // ← 既定の自動マッピング（住所/氏名/備考 など）
+
+  // === ここで URL パラメータで列割当を上書きできます ===
+  // 例: ?labelAddr=所在地&labelName=宛名&labelNote=時間帯
+  (function overrideByParam(){
+    const params = new URLSearchParams(location.search);
+    const norm = s => String(s||'').toLowerCase().replace(/\s/g,'');
+    const find = name => headers.findIndex(h => norm(h) === norm(name));
+    const a = params.get('labelAddr');
+    const n = params.get('labelName');
+    const t = params.get('labelNote');
+    if (a && find(a) >= 0) m.address = find(a);
+    if (n && find(n) >= 0) m.name    = find(n);
+    if (t && find(t) >= 0) m.note    = find(t);
+  })();
+
+  const idx=(k,f)=> (m[k] != null ? m[k] : f);
 
   const out=[];
-  for(let i=1;i<rows.length;i++){
+  for (let i=1;i<rows.length;i++){
     const r=rows[i];
     const ordRaw = (m.order!=null ? r[m.order] : (m.id!=null ? r[m.id] : ''));
     const ordNum = Number.parseFloat(String(ordRaw).replace(/[^\d.\-]/g,''));
     out.push({
-      id: m.id!=null ? r[m.id] : String(i),
-      name: r[idx('name',0)]||'',
-      address: r[idx('address',1)]||'',
-      note: m.note!=null ? r[m.note] : '',
-      lat:  m.lat!=null ? parseCoord(r[m.lat],'lat') : NaN,
-      lng:  m.lng!=null ? parseCoord(r[m.lng],'lng') : NaN,
-      _seq: Number.isFinite(ordNum) ? ordNum : null, // 並び順の元（order/id）
-      _routeIndex: Infinity,
-      _visited:false
+      id   : (m.id!=null ? r[m.id] : String(i)),
+      name : r[idx('name', 0)] || '',
+      address: r[idx('address', 1)] || '',
+      note : (m.note!=null ? r[m.note] : ''),
+      // parseCoord を入れていない場合でも安全にフォールバック
+      lat  : (m.lat!=null ? (typeof parseCoord==='function' ? parseCoord(r[m.lat],'lat') : parseFloat(r[m.lat])) : NaN),
+      lng  : (m.lng!=null ? (typeof parseCoord==='function' ? parseCoord(r[m.lng],'lng') : parseFloat(r[m.lng])) : NaN),
+      _seq : Number.isFinite(ordNum) ? ordNum : null,
+      _routeIndex: Infinity, _visited:false,
     });
   }
   return out;
 }
+
 
 /* ===== メイン ===== */
 export async function initDestLabel(routePoints, getClosestIndex){
@@ -266,6 +287,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
