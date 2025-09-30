@@ -1,6 +1,7 @@
 import { mountAssistPanel } from './assistPanel.js';
 import { Announcer } from './announcer.js';
 import { initDestLabel } from './destLabel.js';   // ← 追加
+import './rideHud.js';   // ← ライドHUDを有効化
 
 
 let announcer = null;
@@ -69,6 +70,7 @@ if (!window.__DN_INIT_CALLED__){
   window.__DN_INIT_CALLED__ = true;
   initAssist();
 }
+
 
 
 
