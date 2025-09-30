@@ -30,7 +30,8 @@ function headerIndexMap(headers){
     note:['note','備考','メモ','時間帯','区分'],
     lat:['lat','latitude','緯度'],
     lng:['lng','long','longitude','経度','経緯度'],
-    id:['id','番号','no'],
+    id:      ['id','番号','no'],
+    order:   ['order','順路','順番','配達順','seq','route']
   };
   for (const k in al){
     const hit=headers.findIndex(h=>norm(h)===norm(al[k][0]) || al[k].some(a=>norm(h)===norm(a)));
@@ -112,6 +113,8 @@ async function loadPoints(){
   const out=[];
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
+    const ordRaw = (m.order!=null ? r[m.order] : (m.id!=null ? r[m.id] : ''));
+    const ordNum = Number.parseFloat(String(ordRaw).replace(/[^\d.\-]/g,'')); // 数値だけ抽出
     out.push({
       id: m.id!=null ? r[m.id] : String(i),
       name: r[idx('name',0)]||'',
@@ -119,7 +122,9 @@ async function loadPoints(){
       note: m.note!=null ? r[m.note] : '',
       lat: m.lat!=null ? parseFloat(r[m.lat]) : NaN,
       lng: m.lng!=null ? parseFloat(r[m.lng]) : NaN,
-      _routeIndex: Infinity, _visited:false
+      _seq: Number.isFinite(ordNum) ? ordNum : null,  // ← 追加：並び順の元
+      _routeIndex: Infinity,
+      _visited: false
     });
   }
   return out;
@@ -221,6 +226,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
   console.log('[DeliNavi] DestLabel initialized');
 }
+
 
 
 
