@@ -240,7 +240,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
         const curPos={lat:pos.lat??pos.coords?.latitude, lng:pos.lng??pos.coords?.longitude};
         if(Number.isFinite(next.lat)&&Number.isFinite(next.lng)){
           const d=haversine(curPos,{lat:next.lat,lng:next.lng});
-          + if (d <= AssistFlags.ARRIVE_RADIUS_M){
+          if (d <= AssistFlags.ARRIVE_RADIUS_M){
    if (AUTO_ADVANCE){
      points[nextIdx]._visited = true;
      const nxt = findNextIndexFromHere(hereIdx);
@@ -266,6 +266,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
