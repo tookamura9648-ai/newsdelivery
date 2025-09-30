@@ -120,8 +120,8 @@ async function loadPoints(){
       name: r[idx('name',0)]||'',
       address: r[idx('address',1)]||'',
       note: m.note!=null ? r[m.note] : '',
-      lat: m.lat!=null ? parseFloat(r[m.lat]) : NaN,
-      lng: m.lng!=null ? parseFloat(r[m.lng]) : NaN,
+      lat  : (m.lat!=null  ? (typeof parseCoord==='function' ? parseCoord(r[m.lat],'lat') : parseFloat(r[m.lat])) : NaN),
+      lng  : (m.lng!=null  ? (typeof parseCoord==='function' ? parseCoord(r[m.lng],'lng') : parseFloat(r[m.lng])) : NaN),
       _seq: Number.isFinite(ordNum) ? ordNum : null,  // ← 追加：並び順の元
       _routeIndex: Infinity,
       _visited: false
@@ -234,6 +234,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
   console.log('[DeliNavi] DestLabel initialized');
 }
+
 
 
 
