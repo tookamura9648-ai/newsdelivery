@@ -83,6 +83,7 @@
 
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true}).setView([35.0,135.87], 13);
+    window.__DN_map = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 
