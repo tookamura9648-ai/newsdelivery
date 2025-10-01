@@ -123,8 +123,45 @@ if (!window.__DN_INIT_CALLED__){
       const lng2=lng1+Math.atan2(Math.sin(br)*Math.sin(d)*Math.cos(lat1), Math.cos(d)-Math.sin(lat1)*Math.sin(lat2));
       return {lat:toDeg(lat2), lng:toDeg(lng2)};
     }
-  });
+
+    // --- GPSデバッグピル（?gpsdebug=1 のときだけ表示） ---
+(function(){
+  const on = new URLSearchParams(location.search).get('gpsdebug') === '1';
+  if (!on) return;
+
+  const pill = document.createElement('div');
+  pill.style.cssText = 'position:fixed;left:10px;top:10px;z-index:9999;padding:6px 10px;border-radius:999px;color:#fff;font:12px/1.2 system-ui;box-shadow:0 4px 12px rgba(0,0,0,.25);background:#444';
+  pill.textContent = 'GPS …';
+  document.body.appendChild(pill);
+
+  let last = 0;
+  function paint() {
+    const age = last ? (Date.now()-last)/1000 : Infinity;
+    pill.textContent = last ? `GPS OK · ${age.toFixed(1)}s` : 'GPS待機…';
+    pill.style.background = (age===Infinity||age>10) ? '#d32f2f' : (age>4 ? '#f9a825' : '#2e7d32');
+    requestAnimationFrame(paint);
+  }
+  paint();
+
+  // 位置更新に相乗り
+  const prev = window.__DN_onGpsUpdate;
+  window.__DN_onGpsUpdate = (pos)=>{
+    last = Date.now();
+    if (typeof prev === 'function') prev(pos);
+  };
+
+  // 地図クリックで擬似位置（デスクトップ検証用）
+  const map = window.__DN_map;
+  if (map && map.on) {
+    pill.title = 'gpsdebug: 地図クリックで現在地を擬似更新';
+    map.on('click', e=>{
+      const {lat,lng} = e.latlng;
+      window.__DN_onGpsUpdate && window.__DN_onGpsUpdate({lat,lng,coords:{latitude:lat,longitude:lng}});
+    });
+  }
 })();
+
+
 
 
 
