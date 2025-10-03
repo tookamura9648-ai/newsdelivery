@@ -80,7 +80,16 @@
     const CSV_URL = './assets/data/points.csv'; // name,lat,lng[,img]
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
     const SHOW_PLANNED_LINE = false; // 青の破線（CSV順の予定線）を出すなら true
-
+    const prevBtn = document.getElementById('btnPrev'); // ← あなたの戻るボタンID/クラスに合わせて
+    const nextBtn = document.getElementById('btnNext'); // ← 次へボタン
+    prevBtn && prevBtn.addEventListener('click', (e)=>{
+      e.preventDefault();
+      stepCSV(-1);
+    });
+    nextBtn && nextBtn.addEventListener('click', (e)=>{
+      e.preventDefault();
+      stepCSV(+1);
+    });
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true}).setView([35.0,135.87], 13);
     window.__DN_map = map;
@@ -173,7 +182,21 @@
         fitAll();
       })
       .catch(err=>{ console.error(err); setStatus('読み込みエラー: ' + err.message); });
-
+    // ★CSV順で前後に動かす（ラベル基準。行は飛ばさない）
+    function stepCSV(delta){
+      const d = (typeof delta === 'number') ? delta : 0; // 念のため数値化
+      const rec = window.DN_destLabelMove ? window.DN_destLabelMove(d) : null;
+    
+      // 地図パンは座標があるときだけ
+      if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
+        map.panTo([rec.lat, rec.lng]);
+      }
+    
+      // カウンタは CSV 基準
+      const idx   = window.DN_destLabelIndex?.() ?? 0;
+      const total = window.DN_destLabelCount?.() ?? 0;
+      updateCounter(idx, total); // ← 引数を取らない実装なら中で取得するよう調整
+    }
     // ====== CSV 読み込み ======
     async function loadCSV(){
       const res = await fetch(CSV_URL, {cache:'no-store'});
