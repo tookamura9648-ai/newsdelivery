@@ -268,7 +268,10 @@ const markers = [];
   current = next;
   updateCounter();
   map.panTo([destinations[current].lat, destinations[current].lng]);
-　window.DN_destLabelNext && window.DN_destLabelNext();
+//window.DN_destLabelNext && window.DN_destLabelNext();
+  window.DN_destLabelMove && window.DN_destLabelMove(delta); // ← 進む/戻るをそのまま反映
+ //（任意）走り出したら“現在＋次”表示に切替
+ // window.DN_setMarkerMode && window.DN_setMarkerMode('pair');    
   window.DN_setMarkerMode && window.DN_setMarkerMode('pair');
       
   // ★ 追加：ラベルも進める／戻す
