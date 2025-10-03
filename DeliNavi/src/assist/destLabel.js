@@ -246,6 +246,20 @@ export async function initDestLabel(routePoints, getClosestIndex){
     return points[cursorIdx];
   };
 
+  // 好きな方向へラベルを動かす（訪問フラグは触らない）
+window.DN_destLabelMove = function(delta){
+  const d = Number(delta) || 0;
+  let next = cursorIdx + d;
+  if (next < 0) next = 0;
+  if (next >= points.length) next = points.length - 1;
+  showByIndex(next);
+  return points[cursorIdx];
+};
+// 便利: 直接インデックス指定 / 前へ
+window.DN_destLabelSet  = function(i){ if (typeof i==='number') showByIndex(i); return points[cursorIdx]; };
+window.DN_destLabelPrev = function(){ return window.DN_destLabelMove(-1); };
+
+
   // 初期表示
   showByIndex(0);
 
@@ -305,6 +319,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
