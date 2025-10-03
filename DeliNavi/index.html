@@ -190,11 +190,7 @@
 
       // マーカー & 予定線
       destMarkers.forEach(m=>map.removeLayer(m)); destMarkers=[];
-      // ★Assistにマーカー配列を登録（非表示制御のため）
-      window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(destMarkers, map);
-
-      // ★起動時は「次だけ」に（＝①だけ表示）
-      window.DN_setMarkerMode && window.DN_setMarkerMode('next');
+      
       if(plannedLayer){ map.removeLayer(plannedLayer); plannedLayer=null; }
 
       destinations.forEach((d,i)=>{
@@ -203,6 +199,11 @@
           .bindTooltip(`${i+1}`, {permanent:true, direction:'top'});
         destMarkers.push(m);
       });
+      
+      // ★Assistにマーカー配列を登録（非表示制御のため）
+      window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(destMarkers, map);
+      // ★起動時は「次だけ」に（＝①だけ表示）
+      window.DN_setMarkerMode && window.DN_setMarkerMode('next');
 
       if (SHOW_PLANNED_LINE) {
         plannedLayer = L.polyline(destinations.map(d=>[d.lat,d.lng]),
