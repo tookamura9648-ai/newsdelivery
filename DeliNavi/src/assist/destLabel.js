@@ -183,24 +183,8 @@ export async function initDestLabel(routePoints, getClosestIndex){
   const points = await loadPoints().catch(e=>{ console.warn('[DeliNavi] points.csv load error',e); return []; });
   if(!points.length){ console.warn('[DeliNavi] points.csv empty; dest label disabled'); return; }
   
-  // 並び順: ①order/id → ②ルート沿い（緯度経度がある場合）→ ③CSV行順
-  const hasExplicitOrder = points.every(p => p._seq != null);
-  if (hasExplicitOrder){
-    points.sort((a,b)=> a._seq - b._seq);
-    points.forEach((p,i)=> p._routeIndex=i);
-  } else {
-    const hasGeo = points.some(p=>Number.isFinite(p.lat)&&Number.isFinite(p.lng));
-    if (hasGeo){
-      for (const p of points){
-        if(Number.isFinite(p.lat)&&Number.isFinite(p.lng)){
-          p._routeIndex = getClosestIndex({lat:p.lat,lng:p.lng});
-        }
-      }
-      points.sort((a,b)=> a._routeIndex - b._routeIndex);
-    } else {
-      points.forEach((p,i)=> p._routeIndex=i);
-    }
-  }
+  // 並び順は「CSVの行順」だけに固定（単純化）
+  points.forEach((p,i)=> p._routeIndex = i);
 
   const card = createCard();
   let lastHereIdx=0, cursorIdx=0;
@@ -241,19 +225,23 @@ export async function initDestLabel(routePoints, getClosestIndex){
   }
 }
 
-  function findNextIndexFromHere(hereIdx){
-    const a=points.findIndex(p=>!p._visited && p._routeIndex>=hereIdx);
-    if(a!==-1) return a;
-    const b=points.findIndex(p=>!p._visited);
-    return b!==-1 ? b : -1;
-  }
+  function findNextIndexFromHere(){
+   // 現在表示している行（cursorIdx）より後で、未訪問の最初を返す
+   for (let i = cursorIdx + 1; i < points.length; i++){
+     if (!points[i]._visited) return i;
+   }
+   // 見つからない場合は先頭からも探す
+   for (let i = 0; i < points.length; i++){
+     if (!points[i]._visited) return i;
+   }
+   return -1;
+ }
 
   // “次へ”ボタン用
   window.DN_destLabelNext = function(){
     if(!points.length) return null;
     points[cursorIdx]._visited = true;
-    let nxt = findNextIndexFromHere(lastHereIdx);
-    if(nxt===-1) nxt = findNextIndexFromHere(-1);
+    let nxt = findNextIndexFromHere();
     if(nxt!==-1) showByIndex(nxt);
     return points[cursorIdx];
   };
@@ -267,6 +255,13 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
   window.__DN_onGpsUpdate = function(pos){
     try{
+      // CSV順モードでは、GPSでラベルを切り替えない（順番は手動のみ）
+     const CSV_MODE = true; // ← “常にCSV順” にするフラグ（パラメータ化不要なら true 固定でOK）
+     if (CSV_MODE) {
+       // 何もしない（HUDや他機能へのGPS連携は下の prev(pos) に任せる）
+       if (typeof prev === 'function') prev(pos);
+       return;
+     }
       const hereIdx = getClosestIndex(pos);
       lastHereIdx = hereIdx;
 
@@ -310,6 +305,7 @@ export async function initDestLabel(routePoints, getClosestIndex){
 
 
   
+
 
 
 
