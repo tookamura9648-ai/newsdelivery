@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
   <title>DeliNavi</title>
 
   <!-- 404防止: 超軽量favicon（ファイル不要） -->
@@ -20,6 +20,9 @@
 
   <style>
     html,body,#map{height:100%;margin:0}
+    body{background:#000;overscroll-behavior:none}
+    #map{position:fixed;inset:0}
+
     .panel{
       position:absolute;z-index:1000;left:10px;top:10px;background:#fff;
       padding:10px 12px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.15);
@@ -30,14 +33,14 @@
     .btn:disabled{opacity:.5;cursor:not-allowed}
     .badge{background:#111;color:#fff;border-radius:10px;padding:3px 8px;font-weight:700}
     .small{font-size:12px;color:#666}
+
     /* QRモーダル */
     #qrModal{display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.5);align-items:center;justify-content:center}
     #qrModal > div{background:#fff;padding:16px 18px;border-radius:12px;text-align:center}
   </style>
 </head>
-  <script type="module" src="./src/assist/initAssist.js"></script>
 <body>
-  <div id="map"></div>
+  <div id="map" aria-label="map"></div>
 
   <!-- UI -->
   <div class="panel">
@@ -69,49 +72,41 @@
     </div>
   </div>
 
+  <!-- アプリ本体（地図・CSV・GPS） -->
   <script>
-  // すべて DOM 構築後に実行（addEventListener の null エラー対策）
   (function whenReady(fn){
-    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, {once:true});
     else fn();
   })(function initApp(){
 
     // ====== 設定 ======
-    const CSV_URL = './assets/data/points.csv'; // name,lat,lng[,img]
+    const CSV_URL = './assets/data/points.csv'; // 列: name,address,note,lat,lng（※列名はdestLabel側でマッピング可）
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
-    const SHOW_PLANNED_LINE = false; // 青の破線（CSV順の予定線）を出すなら true
-    const prevBtn = document.getElementById('btnPrev'); // ← あなたの戻るボタンID/クラスに合わせて
-    const nextBtn = document.getElementById('btnNext'); // ← 次へボタン
-    prevBtn && prevBtn.addEventListener('click', (e)=>{
-      e.preventDefault();
-      stepCSV(-1);
-    });
-    nextBtn && nextBtn.addEventListener('click', (e)=>{
-      e.preventDefault();
-      stepCSV(+1);
-    });
+    const SHOW_PLANNED_LINE = false; // 青の破線（CSV順の予定線）
+    const AUTO_ADVANCE = false;      // 到着で自動で進めない（テスト運用）
+
     // ====== 地図 ======
-    const map = L.map('map', {zoomControl:true}).setView([35.0,135.87], 13);
-    window.__DN_map = map;
+    const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([35.0,135.87], 13);
+    window.__DN_map = map; // Assistモジュール用に公開
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+      {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 
-    // ====== 公式ルート（MultiLine対応） ======
-    const officialRouteGroup = L.featureGroup().addTo(map); // 表示用（複数線）
-    let officialSegments = [];  // [[{lat,lng}…], …] 逸脱距離計算用（既存）
-    let officialRouteFlat = []; // 全線を1本の配列に結合（区間ハイライト用）
-    let legHighlight = null;    // 現在区間のハイライト
+    // ====== 公式ルート ======
+    const officialRouteGroup = L.featureGroup().addTo(map);
+    let officialSegments = [];   // [[latlng...], ...]
+    let officialRouteFlat = [];  // latlng[]（連結）
+    let legHighlight = null;
 
-    // ====== 予定線＆目的地（CSV） ======
+    // ====== 目的地（CSV由来）・マーカー ======
+    // 注意：CSVは“行を飛ばさず”配列に入れる。ピンは座標がある行だけ作る。
+    let csvRows = [];            // 全行（座標が無くても保持）
+    let destMarkers = [];        // Leafletマーカー配列（座標ある行のみ）
     let plannedLayer = null;
-    let destMarkers = [];
-    let destinations = []; // [{name,lat,lng,img?}]
-    let current = 0;
 
-    // ====== 実移動軌跡（GPS生ログ） ======
+    // ====== 実走ログ ======
     const liveTrack = L.polyline([], {color:'#222', weight:3}).addTo(map);
 
-    // ====== 位置アイコン・追従・方位 ======
+    // ====== 自位置マーカー ======
     const userIcon = L.icon({
       iconUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
@@ -120,129 +115,110 @@
              <circle cx="32" cy="32" r="9" fill="#fff"/>
              <polygon points="32,6 44,34 32,28 20,34" fill="#007aff"/>
            </g>
-         </svg>`
-      ),
-      iconSize: [44,44],
-      iconAnchor: [22,22]
+         </svg>`),
+      iconSize:[44,44], iconAnchor:[22,22]
     });
     let userMarker = null, userAccCircle = null;
     let followMode = true, rotateToHeading = true;
     let lastLatLng = null, lastHeading = 0;
 
-    // ====== GPS監視 ======
-    let watchId = null;
+    // ====== 状態UI ======
+    const $ = sel => document.querySelector(sel);
+    const setStatus = t => $('#status').textContent = t;
 
-    // ====== 簡易通知（WebAudio + バイブ） ======
-    let audioCtx = null;
-    function ping(){
-      try{
-        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-        o.frequency.value = 880; g.gain.value = 0.0001;
-        o.connect(g).connect(audioCtx.destination);
-        o.start(); g.gain.exponentialRampToValueAtTime(0.2, audioCtx.currentTime+0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+0.25);
-        o.stop(audioCtx.currentTime+0.26);
-      }catch(e){}
-      if(navigator.vibrate) navigator.vibrate([200,100,200]);
-    }
+    // ====== ボタン配線（±1に正規化） ======
+    const prevBtn = $('#btnPrev');
+    const nextBtn = $('#btnNext');
+    prevBtn?.addEventListener('click', e => { e.preventDefault(); stepCSV(-1); });
+    nextBtn?.addEventListener('click', e => { e.preventDefault(); stepCSV(+1); });
 
-    // ====== ユーティリティ ======
-    const $ = (sel)=>document.querySelector(sel);
-    const on = (sel, type, handler)=>{
-      const el = $(sel);
-      if(!el){ console.warn('not found:', sel); return; }
-      el.addEventListener(type, handler);
-    };
-    const setStatus = (t)=> $('#status').textContent = t;
+    $('#btnFit').addEventListener('click', fitAll);
+    $('#btnGPS').addEventListener('click', startGPS);
+    $('#btnStop').addEventListener('click', stopGPS);
+    $('#btnQR').addEventListener('click', showQR);
+    $('#qrClose').addEventListener('click', ()=>{ $('#qrModal').style.display='none'; });
 
-    // ====== イベント ======
-    on('#btnFit','click', fitAll);
-    on('#btnPrev','click', ()=> moveIndex(-1));
-    on('#btnNext','click', ()=> moveIndex(1));
-    on('#btnGPS','click', startGPS);
-    on('#btnStop','click', stopGPS);
-    on('#btnQR','click', showQR);
-    on('#qrClose','click', ()=>{ $('#qrModal').style.display='none'; });
-
-    on('#chkFollow','change', e=>{
+    $('#chkFollow').addEventListener('change', e=>{
       followMode = e.target.checked;
       if (followMode && lastLatLng) map.setView(lastLatLng, map.getZoom(), {animate:false});
     });
-    on('#chkHeading','change', e=>{
+    $('#chkHeading').addEventListener('change', e=>{
       rotateToHeading = e.target.checked;
-      if (userMarker && userMarker.setRotationAngle) userMarker.setRotationAngle(rotateToHeading ? lastHeading : 0);
+      if (userMarker?.setRotationAngle) userMarker.setRotationAngle(rotateToHeading ? lastHeading : 0);
     });
 
     // ====== 初期ロード ======
     Promise.all([loadOfficialRoute(), loadCSV()])
       .then(()=>{
-        updateLegHighlight();  // ★区間ハイライト初期化
         setStatus('準備OK。GPS開始でスタート');
         fitAll();
       })
       .catch(err=>{ console.error(err); setStatus('読み込みエラー: ' + err.message); });
-    // ★CSV順で前後に動かす（ラベル基準。行は飛ばさない）
-    function stepCSV(delta){
-      const d = (typeof delta === 'number') ? delta : 0; // 念のため数値化
-      const rec = window.DN_destLabelMove ? window.DN_destLabelMove(d) : null;
-    
-      // 地図パンは座標があるときだけ
-      if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
-        map.panTo([rec.lat, rec.lng]);
-      }
-    
-      // カウンタは CSV 基準
-      const idx   = window.DN_destLabelIndex?.() ?? 0;
-      const total = window.DN_destLabelCount?.() ?? 0;
-      updateCounter(idx, total); // ← 引数を取らない実装なら中で取得するよう調整
-    }
-    // ====== CSV 読み込み ======
+
+    // ====== CSV 読み込み（行は飛ばさない） ======
     async function loadCSV(){
       const res = await fetch(CSV_URL, {cache:'no-store'});
       if(!res.ok) throw new Error('points.csv not found');
       const text = await res.text();
       const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
-      destinations = parsed.data.map(r=>({
-        name: r.name ?? r.名前 ?? r.label ?? '',
-        lat:  parseFloat(r.lat ?? r.latitude ?? r.緯度),
-        lng:  parseFloat(r.lng ?? r.longitude ?? r.経度),
-        img:  r.img ?? r.image ?? ''
-      })).filter(d=>Number.isFinite(d.lat) && Number.isFinite(d.lng));
-      if(!destinations.length) throw new Error('CSVに有効な座標がありません');
 
-      // マーカー & 予定線
-      destMarkers.forEach(m=>map.removeLayer(m)); destMarkers=[];
-      
-      if(plannedLayer){ map.removeLayer(plannedLayer); plannedLayer=null; }
+      // 全行保持（座標はNaNのままでもOK）
+      csvRows = parsed.data.map(r=>({
+        name: (r.name ?? r.氏名 ?? r.お名前 ?? r.label ?? '').trim(),
+        address: (r.address ?? r.住所 ?? r.所在地 ?? '').trim(),
+        note: (r.note ?? r.備考 ?? r.メモ ?? r.区分 ?? '').trim(),
+        lat: parseFloat(r.lat ?? r.latitude ?? r.緯度),
+        lng: parseFloat(r.lng ?? r.longitude ?? r.経度)
+      }));
 
-      destinations.forEach((d,i)=>{
-        const m = L.marker([d.lat,d.lng])
-          .addTo(map)
-          .bindTooltip(`${i+1}`, {permanent:true, direction:'top'});
-        destMarkers.push(m);
+      // 目的地ピンは「座標がある行だけ」作る
+      destMarkers.forEach(m=>map.removeLayer(m)); destMarkers = [];
+      if (plannedLayer){ map.removeLayer(plannedLayer); plannedLayer=null; }
+
+      csvRows.forEach((d,i)=>{
+        if (Number.isFinite(d.lat) && Number.isFinite(d.lng)) {
+          const m = L.marker([d.lat,d.lng]).addTo(map)
+            .bindTooltip(String(i+1), {permanent:true, direction:'top'});
+          destMarkers.push(m);
+        }
       });
-      
-      // ★Assistにマーカー配列を登録（非表示制御のため）
+
+      // Assistに登録 → ①だけ表示
       window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(destMarkers, map);
-      // ★起動時は「次だけ」に（＝①だけ表示）
-      window.DN_setMarkerMode && window.DN_setMarkerMode('next');
+      window.DN_setMarkerMode && window.DN_setMarkerMode('next'); // 起動時は次だけ（=①だけ）
 
       if (SHOW_PLANNED_LINE) {
-        plannedLayer = L.polyline(destinations.map(d=>[d.lat,d.lng]),
-          { color:'#1e6bff', weight:3, dashArray:'6 6' }).addTo(map);
+        const line = csvRows.filter(d=>Number.isFinite(d.lat)&&Number.isFinite(d.lng))
+                            .map(d=>[d.lat,d.lng]);
+        plannedLayer = L.polyline(line, { color:'#1e6bff', weight:3, dashArray:'6 6' }).addTo(map);
       }
 
-      current = 0;
-      updateCounter();
-      $('#btnNext').disabled = destinations.length<=1;
+      // カウンタ初期化（destLabelが起動するまで待ってから更新）
+      setTimeout(()=>refreshCounterAndHighlight(), 0);
     }
 
-    // 例：地図とマーカー作成が終わった直後
-const markers = [];
-  map.eachLayer(l => { if (l instanceof L.Marker || l.getLatLng) markers.push(l); });
-  window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(markers, map);
+    // ====== カウンタと区間ハイライト（CSV基準） ======
+    let lastRec = null; // 直前表示していたラベルの行
+    function stepCSV(delta){
+      const move = window.DN_destLabelMove;
+      const curr = window.DN_destLabelCurrent?.() || null;
+      if (curr) lastRec = curr; // 前の行を保持
 
+      const rec = move ? move(delta) : null; // 表示行を±1
+      if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
+        map.panTo([rec.lat, rec.lng]);
+      }
+      refreshCounterAndHighlight(rec, lastRec);
+    }
+    function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
+      const idx   = window.DN_destLabelIndex?.() ?? 0;
+      const total = window.DN_destLabelCount?.() ?? csvRows.length;
+      $('#counter').textContent = `#${total ? idx+1 : 0} / ${total}`;
+      $('#btnPrev').disabled = (idx <= 0);
+      $('#btnNext').disabled = (idx >= total-1);
+
+      updateLegHighlight(prevRec, nowRec);
+    }
 
     // ====== 公式ルート（MultiLine / FeatureCollection 対応） ======
     async function loadOfficialRoute(){
@@ -270,7 +246,7 @@ const markers = [];
           const latlngs = coords.map(([lng,lat])=>[lat,lng]);
           L.polyline(latlngs, {color, weight:5, opacity:.9}).addTo(officialRouteGroup);
           officialSegments.push(latlngs);
-          officialRouteFlat.push(...latlngs); // ★フラット配列に結合
+          officialRouteFlat.push(...latlngs);
         });
       });
     }
@@ -281,35 +257,11 @@ const markers = [];
       if(officialRouteGroup.getLayers().length) b.extend(officialRouteGroup.getBounds());
       if(plannedLayer) b.extend(plannedLayer.getBounds());
       if(destMarkers.length) b.extend(L.featureGroup(destMarkers).getBounds());
-      if(legHighlight) b.extend(legHighlight.getBounds()); // ★ハイライトも含める
+      if(legHighlight) b.extend(legHighlight.getBounds());
       if(b.isValid()) map.fitBounds(b, {padding:[20,20]});
     }
 
-    function moveIndex(delta){
-  // ★CSV順で移動（行は飛ばさない）
-  const rec = window.DN_destLabelMove ? window.DN_destLabelMove(delta) : null;
-
-  // 地図パンは座標があるときだけ
-  if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
-    map.panTo([rec.lat, rec.lng]);
-  }
-
-  // カウンタもCSV基準に（分子=行番号 / 分母=CSV総数）
-  const idx   = window.DN_destLabelIndex ? window.DN_destLabelIndex() : 0;
-  const total = window.DN_destLabelCount ? window.DN_destLabelCount() : 0;
-  updateCounter(idx, total);   // ← 引数を渡せない実装なら、関数内で下の式を使うよう修正
-}
-
-
-
-    function updateCounter(){
-      $('#counter').textContent = `#${destinations.length?current+1:0} / ${destinations.length}`;
-      $('#btnPrev').disabled = current<=0;
-      $('#btnNext').disabled = current>=destinations.length-1;
-      updateLegHighlight(); // ★区間ハイライト更新
-    }
-
-    // ====== 区間ハイライト ======
+    // ====== 区間ハイライト（prev→now を公式ルート上で太線） ======
     function nearestIndexOnRoute(pt/* [lat,lng] */){
       if (!officialRouteFlat.length) return 0;
       let best = 0, bestD = Infinity;
@@ -319,177 +271,146 @@ const markers = [];
       }
       return best;
     }
+    function updateLegHighlight(prevRec, nowRec){
+      // 既存削除
+      if (legHighlight) { map.removeLayer(legHighlight); legHighlight=null; }
 
-    function updateLegHighlight(){
-      if (!destinations.length || !officialRouteFlat.length) {
-        // 公式ルートが無いときは直線で代替
-        if (legHighlight) { map.removeLayer(legHighlight); legHighlight=null; }
-        const a = (current===0) ? destinations[0] : destinations[current-1];
-        const b = (current===0) ? destinations[0] : destinations[current];
-        if (a && b) legHighlight = L.polyline([[a.lat,a.lng],[b.lat,b.lng]], {color:'#ff2970', weight:7}).addTo(map);
+      if (!nowRec || !Number.isFinite(nowRec.lat) || !Number.isFinite(nowRec.lng)) return;
+
+      // prev が無ければ now の一点 or now までの短線
+      let A = null, B = [nowRec.lat, nowRec.lng];
+      if (prevRec && Number.isFinite(prevRec.lat) && Number.isFinite(prevRec.lng)) {
+        A = [prevRec.lat, prevRec.lng];
+      } else {
+        A = B;
+      }
+
+      if (!officialRouteFlat.length) {
+        // 公式ルート無し → 直線
+        if (A && B) legHighlight = L.polyline([A,B], {color:'#ff2970', weight:7}).addTo(map);
         return;
       }
 
-      let startIdx, endIdx;
-      if (current === 0){
-        startIdx = 0;
-        endIdx   = nearestIndexOnRoute([destinations[0].lat, destinations[0].lng]);
-      } else {
-        const prev = destinations[current-1];
-        const now  = destinations[current];
-        startIdx = nearestIndexOnRoute([prev.lat, prev.lng]);
-        endIdx   = nearestIndexOnRoute([now.lat,  now.lng]);
-      }
-
-      let seg;
-      if (startIdx <= endIdx) seg = officialRouteFlat.slice(startIdx, endIdx+1);
-      else                    seg = officialRouteFlat.slice(endIdx, startIdx+1).reverse();
-
-      if (legHighlight) { map.removeLayer(legHighlight); legHighlight = null; }
-      if (seg.length >= 2){
+      const s = nearestIndexOnRoute(A);
+      const e = nearestIndexOnRoute(B);
+      const seg = (s<=e) ? officialRouteFlat.slice(s, e+1) : officialRouteFlat.slice(e, s+1).reverse();
+      if (seg.length >= 2) {
         legHighlight = L.polyline(seg, { color:'#ff2970', weight:7, opacity:0.9 }).addTo(map);
       }
     }
 
     // ====== GPS ======
+    let watchId = null;
     function startGPS(){
       if(!('geolocation' in navigator)){ setStatus('この端末はGPS非対応'); return; }
-      if(!audioCtx){ try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } // ユーザー操作で初期化
-
       $('#btnGPS').disabled = true;
       $('#btnStop').disabled = false;
       setStatus('測位中…');
-
       liveTrack.setLatLngs([]);
 
       watchId = navigator.geolocation.watchPosition(onPos, onErr, {
         enableHighAccuracy:true, maximumAge:0, timeout:15000
       });
     }
-
     function stopGPS(){
       if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
       $('#btnGPS').disabled = false;
       $('#btnStop').disabled = true;
       setStatus('停止しました');
     }
-
     function onPos(pos){
       const { latitude:lat, longitude:lng, accuracy, heading:h } = pos.coords;
       const curr = [lat, lng];
 
-      // ユーザー位置マーカー＆精度円
+      // 自位置
       if (!userMarker) {
         userMarker = L.marker(curr, { icon:userIcon, rotationAngle:0, rotationOrigin:'center' }).addTo(map);
         userAccCircle = L.circle(curr, { radius: accuracy||0, color:'#2b8', weight:1, fillOpacity:0.07 }).addTo(map);
       } else {
         userMarker.setLatLng(curr);
-        if (userAccCircle) userAccCircle.setLatLng(curr).setRadius(accuracy||0);
+        userAccCircle?.setLatLng(curr).setRadius(accuracy||0);
       }
 
       // 進行方向
       let hdg = Number.isFinite(h) ? h : (lastLatLng ? bearing(lastLatLng, curr) : lastHeading||0);
       if (rotateToHeading && userMarker.setRotationAngle) userMarker.setRotationAngle(hdg);
-      lastHeading = hdg;
-      lastLatLng = curr;
+      lastHeading = hdg; lastLatLng = curr;
 
-      // 中央追従
+      // 追従
       if (followMode) map.setView(curr, map.getZoom(), {animate:false});
 
-      // 実走軌跡
+      // 実走ログ
       liveTrack.addLatLng(curr);
 
-      // 到着判定
-      const cur = destinations[current];
-      if (cur) {
-        const d = distanceMeters(curr, [cur.lat, cur.lng]);
+      // 到着判定（自動前進はOFF）
+      const rec = window.DN_destLabelCurrent?.();
+      if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
+        const d = distanceMeters(curr, [rec.lat, rec.lng]);
         const rr = parseFloat($('#radius').value) || 50;
         setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m`);
         if (d <= rr) {
           ping();
-          showArrive(cur);
-          if (current < destinations.length-1) { current++; updateCounter(); }
+          showArrive(rec);
+          if (AUTO_ADVANCE) stepCSV(+1);
         }
       }
+    }
+    function onErr(err){ setStatus('GPSエラー: ' + err.message); }
 
-      // 逸脱チェック（必要なら）
-      if (officialSegments.length) {
-        const dist = minDistanceToRoute(curr);
-        // if (dist > 120) setStatus(`正規ルートから ${Math.round(dist)}m 離れています`);
-      }
+    // ====== 通知（WebAudio + バイブ） ======
+    let audioCtx = null;
+    function ping(){
+      try{
+        if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = 880; g.gain.value = 0.0001;
+        o.connect(g).connect(audioCtx.destination);
+        o.start(); g.gain.exponentialRampToValueAtTime(0.2, audioCtx.currentTime+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+0.25);
+        o.stop(audioCtx.currentTime+0.26);
+      }catch(e){}
+      if(navigator.vibrate) navigator.vibrate([200,100,200]);
     }
-
-    function onErr(err){
-      setStatus('GPSエラー: ' + err.message);
-    }
-
-    function showArrive(d){
-      const html = `<div><strong>到着:</strong> ${d.name||''}<br>
-        緯度:${d.lat.toFixed(6)} / 経度:${d.lng.toFixed(6)}</div>`;
-      L.popup().setLatLng([d.lat,d.lng]).setContent(html).openOn(map);
-      if(d.img){
-        const im = new Image(); im.src = d.img; // 先読み
-      }
-    }
-
-    // ====== 距離・幾何 ======
-    function distanceMeters(a,b){
-      const toRad = x=>x*Math.PI/180;
-      const R=6371000;
-      const dLat=toRad(b[0]-a[0]), dLng=toRad(b[1]-a[1]);
-      const s1=Math.sin(dLat/2)**2 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*Math.sin(dLng/2)**2;
-      return 2*R*Math.asin(Math.sqrt(s1));
-    }
-
-    function bearing(a, b){ // a=[lat,lng], b=[lat,lng] → 0..360°
-      const toRad = d => d*Math.PI/180, toDeg = r => r*180/Math.PI;
-      const φ1 = toRad(a[0]), φ2 = toRad(b[0]), Δλ = toRad(b[1]-a[1]);
-      const y = Math.sin(Δλ) * Math.cos(φ2);
-      const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
-      return (toDeg(Math.atan2(y, x)) + 360) % 360;
-    }
-
-    // 点-線分最近接距離（m）
-    function distancePointToSegment(p, a, b){
-      const toXY = (ll)=> latlngToMeters(ll[0], ll[1]);
-      const P = toXY(p), A = toXY([a.lat,a.lng]), B = toXY([b.lat,b.lng]);
-      const AB = [B.x-A.x, B.y-A.y], AP = [P.x-A.x, P.y-A.y];
-      const ab2 = AB[0]*AB[0] + AB[1]*AB[1];
-      const t = Math.max(0, Math.min(1, (AP[0]*AB[0]+AP[1]*AB[1]) / (ab2||1)));
-      const proj = {x: A.x + AB[0]*t, y: A.y + AB[1]*t};
-      const dx = P.x - proj.x, dy = P.y - proj.y;
-      return Math.sqrt(dx*dx + dy*dy);
-    }
-    function latlngToMeters(lat,lng){
-      const x = lng * 20037508.34 / 180;
-      let y = Math.log(Math.tan((90+lat)*Math.PI/360)) / (Math.PI/180);
-      y = y * 20037508.34 / 180;
-      return {x,y};
-    }
-    function minDistanceToRoute(pLatLng){
-      if(!officialSegments.length) return 0;
-      let best = Infinity;
-      for(const seg of officialSegments){
-        for(let i=0;i<seg.length-1;i++){
-          best = Math.min(best, distancePointToSegment(pLatLng, seg[i], seg[i+1]));
-        }
-      }
-      return (best===Infinity)?0:best;
-    }
-
-    // ====== QR共有 ======
     function showQR(){
-      const url = location.origin + location.pathname;
+      const url = location.origin + location.pathname + location.search;
       const canvas = document.getElementById('qrCanvas');
       QRCode.toCanvas(canvas, url, { width: 260, margin: 1 }, (err)=>{ if(err) console.error(err); });
       document.getElementById('qrUrl').textContent = url;
       document.getElementById('qrModal').style.display = 'flex';
     }
 
+    // ====== 距離系 ======
+    function distanceMeters(a,b){
+      const toRad = x=>x*Math.PI/180, R=6371000;
+      const dLat=toRad(b[0]-a[0]), dLng=toRad(b[1]-a[1]);
+      const s1=Math.sin(dLat/2)**2 + Math.cos(toRad(a[0]))*Math.cos(toRad(b[0]))*Math.sin(dLng/2)**2;
+      return 2*R*Math.asin(Math.sqrt(s1));
+    }
+    function bearing(a,b){
+      const toRad = d=>d*Math.PI/180, toDeg = r=>r*180/Math.PI;
+      const φ1=toRad(a[0]), φ2=toRad(b[0]), Δλ=toRad(b[1]-a[1]);
+      const y=Math.sin(Δλ)*Math.cos(φ2);
+      const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+      return (toDeg(Math.atan2(y,x))+360)%360;
+    }
+
+    // ====== ポップアップ ======
+    function showArrive(d){
+      const html = `<div><strong>到着:</strong> ${d.name||''}<br>
+        緯度:${Number.isFinite(d.lat)?d.lat.toFixed(6):'-'} / 経度:${Number.isFinite(d.lng)?d.lng.toFixed(6):'-'}</div>`;
+      if (Number.isFinite(d.lat) && Number.isFinite(d.lng)){
+        L.popup().setLatLng([d.lat,d.lng]).setContent(html).openOn(map);
+      }
+    }
+
   }); // initApp
   </script>
+
+  <!-- Assist 起動（destLabel / rideHud / focusMarkers など） -->
+  <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
