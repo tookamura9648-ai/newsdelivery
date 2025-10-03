@@ -96,15 +96,19 @@ function styleAsNext(m){
 }
 
 function restyleAll(){
-  // まず可視なものを一旦クリア
+  // クリア/強調 は「見せるピン」にだけ適用（隠すピンには触らない）
   for (let i=0;i<_markers.length;i++){
-    const m=_markers[i];
-    // 非表示中でも後で出した時のためにアイコンを戻しておく
-    clearStyle(m);
+    if (isVisibleIndex(i)) clearStyle(_markers[i]);
   }
-  // 役割ごとに適用
-  if (_curr>=0 && _markers[_curr]) styleAsCurrent(_markers[_curr]);
-  if (_next>=0 && _markers[_next]) styleAsNext(_markers[_next]);
+  if (_curr>=0 && isVisibleIndex(_curr) && _markers[_curr]) styleAsCurrent(_markers[_curr]);
+  if (_next>=0 && isVisibleIndex(_next) && _markers[_next]) styleAsNext(_markers[_next]);
+}
+
+function isVisibleIndex(i){
+  if (_mode === 'all') return true;
+  if (_mode === 'next') return i === _next;
+  // pair
+  return i === _curr || i === _next;
 }
 
 function applyVisibility(){
@@ -185,6 +189,7 @@ window.DN_setMarkerMode = function(mode /* 'pair'|'next'|'all' */){
 // 互換エイリアス
 window.DN_showAllDests = function(){ window.DN_setMarkerMode('all'); };
 window.DN_hideOthers  = function(){ window.DN_setMarkerMode('next'); };
+
 
 
 
