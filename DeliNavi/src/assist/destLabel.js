@@ -255,6 +255,11 @@ window.DN_destLabelMove = function(delta){
   showByIndex(next);
   return points[cursorIdx];
 };
+// 現在のCSV行インデックス／総数／現在のレコード
+window.DN_destLabelIndex   = () => cursorIdx;
+window.DN_destLabelCount   = () => points.length;
+window.DN_destLabelCurrent = () => points[cursorIdx] || null;
+  
 // 便利: 直接インデックス指定 / 前へ
 window.DN_destLabelSet  = function(i){ if (typeof i==='number') showByIndex(i); return points[cursorIdx]; };
 window.DN_destLabelPrev = function(){ return window.DN_destLabelMove(-1); };
@@ -319,6 +324,7 @@ window.DN_destLabelPrev = function(){ return window.DN_destLabelMove(-1); };
 
 
   
+
 
 
 
