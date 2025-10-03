@@ -263,24 +263,20 @@ const markers = [];
     }
 
     function moveIndex(delta){
-  const next = Math.min(Math.max(current + delta, 0), destinations.length - 1);
-  if (next === current) return;
-  current = next;
-  updateCounter();
-  map.panTo([destinations[current].lat, destinations[current].lng]);
-//window.DN_destLabelNext && window.DN_destLabelNext();
-  window.DN_destLabelMove && window.DN_destLabelMove(delta); // ← 進む/戻るをそのまま反映
- //（任意）走り出したら“現在＋次”表示に切替
- // window.DN_setMarkerMode && window.DN_setMarkerMode('pair');    
-  window.DN_setMarkerMode && window.DN_setMarkerMode('pair');
-      
-  // ★ 追加：ラベルも進める／戻す
-  if (delta > 0) {
-    window.DN_destLabelNext && window.DN_destLabelNext();
-  } else if (delta < 0) {
-    window.DN_destLabelPrev && window.DN_destLabelPrev();   // ← おまけ実装した場合だけ
+  // ★CSV順で移動（行は飛ばさない）
+  const rec = window.DN_destLabelMove ? window.DN_destLabelMove(delta) : null;
+
+  // 地図パンは座標があるときだけ
+  if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
+    map.panTo([rec.lat, rec.lng]);
   }
+
+  // カウンタもCSV基準に（分子=行番号 / 分母=CSV総数）
+  const idx   = window.DN_destLabelIndex ? window.DN_destLabelIndex() : 0;
+  const total = window.DN_destLabelCount ? window.DN_destLabelCount() : 0;
+  updateCounter(idx, total);   // ← 引数を渡せない実装なら、関数内で下の式を使うよう修正
 }
+
 
 
     function updateCounter(){
