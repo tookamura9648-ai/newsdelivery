@@ -268,7 +268,9 @@ const markers = [];
   current = next;
   updateCounter();
   map.panTo([destinations[current].lat, destinations[current].lng]);
-
+　window.DN_destLabelNext && window.DN_destLabelNext();
+  window.DN_setMarkerMode && window.DN_setMarkerMode('pair');
+      
   // ★ 追加：ラベルも進める／戻す
   if (delta > 0) {
     window.DN_destLabelNext && window.DN_destLabelNext();
