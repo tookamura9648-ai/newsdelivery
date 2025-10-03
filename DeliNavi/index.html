@@ -38,6 +38,12 @@
     #qrModal{display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.5);align-items:center;justify-content:center}
     #qrModal > div{background:#fff;padding:16px 18px;border-radius:12px;text-align:center}
   </style>
+
+  <style>
+  /* 追加：Leafletのツールチップ（番号バッジ）を常に非表示 */
+  .leaflet-tooltip { display: none !important; }
+  </style>
+  
 </head>
 <body>
   <div id="map" aria-label="map"></div>
