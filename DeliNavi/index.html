@@ -90,6 +90,10 @@
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
     const SHOW_PLANNED_LINE = false; // 青の破線（CSV順の予定線）
     const AUTO_ADVANCE = false;      // 到着で自動で進めない（テスト運用）
+    const MIN_RADIUS = 8;          // 到着半径の下限（密集地想定）
+    const ARRIVE_DWELL_MS = 2000;  // 半径内にこの時間以上いたら「到着」
+    const SPEED_SLOW_KMH = 8;      // 低速判定（これ以下の速度で到着扱い）
+    const ARRIVE_COOLDOWN_MS = 10000; // 到着後の再判定クールダウン
 
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([35.0,135.87], 13);
@@ -108,6 +112,8 @@
     let csvRows = [];            // 全行（座標が無くても保持）
     let destMarkers = [];        // Leafletマーカー配列（座標ある行のみ）
     let plannedLayer = null;
+    let __arriveSinceTs = 0;       // 半径内に入った開始時刻
+    let __arriveCooldownUntil = 0; // 次に到着判定してよい時刻
 
     // ====== 実走ログ ======
     const liveTrack = L.polyline([], {color:'#222', weight:3}).addTo(map);
@@ -192,6 +198,13 @@
       // Assistに登録 → ①だけ表示
       window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(destMarkers, map);
       window.DN_setMarkerMode && window.DN_setMarkerMode('next'); // 起動時は次だけ（=①だけ）
+
+      const radInput = document.getElementById('radius');
+        if (radInput){
+          radInput.min = MIN_RADIUS;
+          radInput.step = 1;
+          if ((parseFloat(radInput.value)||0) < MIN_RADIUS) radInput.value = MIN_RADIUS;
+        }
 
       if (SHOW_PLANNED_LINE) {
         const line = csvRows.filter(d=>Number.isFinite(d.lat)&&Number.isFinite(d.lng))
@@ -349,17 +362,48 @@
       liveTrack.addLatLng(curr);
 
       // 到着判定（自動前進はOFF）
-      const rec = window.DN_destLabelCurrent?.();
-      if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
-        const d = distanceMeters(curr, [rec.lat, rec.lng]);
-        const rr = parseFloat($('#radius').value) || 50;
-        setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m`);
-        if (d <= rr) {
-          ping();
-          showArrive(rec);
-          if (AUTO_ADVANCE) stepCSV(+1);
-        }
-      }
+      // 到着判定（自動前進はAUTO_ADVANCEフラグで制御）
+const rec = window.DN_destLabelCurrent?.();
+if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
+  const curr = [lat, lng];
+  const d = distanceMeters(curr, [rec.lat, rec.lng]);
+  const acc = accuracy ?? 30;                              // 端末が返す精度[m]
+  const userR = parseFloat(document.getElementById('radius').value) || 50;
+
+  // 有効半径：精度が良いほど狭める（例: accuracy*0.6+3 を上限に、ユーザ指定と下限でクランプ）
+  const autoR = Math.round(acc * 0.6 + 3);                 // 例: 精度10m → 9m程度
+  const effR  = Math.max(MIN_RADIUS, Math.min(userR, autoR));
+
+  const now = performance.now();
+  const speedKmh = (pos.coords.speed != null && isFinite(pos.coords.speed))
+    ? pos.coords.speed * 3.6
+    : null;
+  const isSlow = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
+  const cooldownOK = now >= __arriveCooldownUntil;
+
+  // 半径に入っている間はタイマを進め、出たらリセット
+  if (d <= effR) {
+    if (!__arriveSinceTs) __arriveSinceTs = now;
+  } else {
+    __arriveSinceTs = 0;
+  }
+  const hasDwelled = __arriveSinceTs && ((now - __arriveSinceTs) >= ARRIVE_DWELL_MS);
+
+  // ステータス表示（任意）
+  setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m / 判定${effR}m`);
+
+  if (d <= effR && hasDwelled && isSlow && cooldownOK) {
+    // 到着確定！
+    ping();
+    showArrive(rec);
+
+    __arriveSinceTs = 0;
+    __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
+
+    if (AUTO_ADVANCE) stepCSV(+1); // 自動前進を使う場合のみ
+  }
+}
+
     }
     function onErr(err){ setStatus('GPSエラー: ' + err.message); }
 
