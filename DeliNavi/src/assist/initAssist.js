@@ -9,6 +9,8 @@ import './focusMarkers.js';
 import './rideHud.js';
 import './assistPanel.js'; // パネルを使っている場合。未使用なら消してOK
 import { initDestLabel } from './destLabel.js';
+import { initTurnEngine, onGpsTurnUpdate } from './turns.js';
+
 
 // ===== ユーティリティ =====
 const qs = new URLSearchParams(location.search);
@@ -78,6 +80,7 @@ if (typeof window.__DN_onGpsUpdate !== 'function') {
   try {
     // 1) ルート読込
     const route = await loadRoutePoints();
+    initTurnEngine(route);
     const getClosestIndex = getClosestIndexFactory(route);
 
     // 共有（HUD/turn案内・他モジュール用）
@@ -213,11 +216,11 @@ function setupGpsDebugPill(){
   paint();
 
   // 位置更新に相乗り
-  const prev = window.__DN_onGpsUpdate;
-  window.__DN_onGpsUpdate = (pos)=>{
-    last = Date.now();
-    if (typeof prev === 'function') prev(pos);
-  };
+const __prev = window.__DN_onGpsUpdate;
+window.__DN_onGpsUpdate = (pos)=>{
+  try { onGpsTurnUpdate(pos); } catch(e){}
+  if (typeof __prev === 'function') __prev(pos);
+};
 
   // 地図クリックで疑似更新（デスクトップ検証用）
   const attach = ()=>{
@@ -230,6 +233,7 @@ function setupGpsDebugPill(){
   };
   attach();
 }
+
 
 
 
