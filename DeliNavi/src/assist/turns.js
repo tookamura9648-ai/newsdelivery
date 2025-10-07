@@ -141,8 +141,8 @@ function installUI(){
   el.id = UI_ID;
   el.style.cssText = 'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9500;padding:10px 14px;border-radius:12px;background:rgba(0,0,0,.85);color:#fff;min-width:240px;box-shadow:0 10px 24px rgba(0,0,0,.35);font:600 16px/1.25 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif;text-align:center;pointer-events:none;display:flex;gap:10px;align-items:center;justify-content:center';
   el.innerHTML =
-    '<canvas id="dn-turn-cv" width="164" height="164" style="width:82px;height:82px"></canvas>' +
-    '<div style="text-align:left"><div id="dn-turn-line1" style="font-size:18px"></div><div id="dn-turn-line2" style="opacity:.85;font-size:13px;margin-top:3px"></div></div>';
+    '<canvas id="dn-turn-cv" width="164" height="164" style="width:82px;height:82px" aria-hidden="true"></canvas>' +
+    '<div style="text-align:left"><div id="dn-turn-line1" ...></div> ...';
   document.body.appendChild(el);
 }
 function updateUIFromNext(){
@@ -294,3 +294,4 @@ function hapticNow(next){
 // ===== グローバルフォールバック（念のため） =====
 window.DN_initTurnEngine = initTurnEngine;
 window.DN_onGpsTurnUpdate = onGpsTurnUpdate;
+
