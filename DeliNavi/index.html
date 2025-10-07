@@ -229,15 +229,19 @@
       }
       refreshCounterAndHighlight(rec, lastRec);
     }
-    function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
+  function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
       const idx   = window.DN_destLabelIndex?.() ?? 0;
       const total = window.DN_destLabelCount?.() ?? csvRows.length;
       $('#counter').textContent = `#${total ? idx+1 : 0} / ${total}`;
       $('#btnPrev').disabled = (idx <= 0);
       $('#btnNext').disabled = (idx >= total-1);
-
+    
+      // 区間ハイライト更新（既存）
       updateLegHighlight(prevRec, nowRec);
-    }
+    
+      // ★ターン案内エンジンにも同じ区間を渡す（ここに1行）
+      window.DN_setTurnLeg && window.DN_setTurnLeg(prevRec, nowRec);
+  }
 
     // ====== 公式ルート（MultiLine / FeatureCollection 対応） ======
     async function loadOfficialRoute(){
