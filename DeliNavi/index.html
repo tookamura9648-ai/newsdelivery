@@ -101,7 +101,16 @@
     window.__DN_map = map; // Assistモジュール用に公開
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
-
+    // map を作った直後に 1 回だけ
+    const zc = map.zoomControl;
+    if (zc && zc._zoomInButton) {
+      zc._zoomInButton.setAttribute('title', '拡大');
+      zc._zoomInButton.setAttribute('aria-label', '拡大');
+    }
+    if (zc && zc._zoomOutButton) {
+      zc._zoomOutButton.setAttribute('title', '縮小');
+      zc._zoomOutButton.setAttribute('aria-label', '縮小');
+    }
     // ====== 公式ルート ======
     const officialRouteGroup = L.featureGroup().addTo(map);
     let officialSegments = [];   // [[latlng...], ...]
