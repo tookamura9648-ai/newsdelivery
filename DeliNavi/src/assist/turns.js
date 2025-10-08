@@ -179,45 +179,64 @@ function updateUIArrive(){ const l1=document.getElementById('dn-turn-line1'); co
   if (l1) l1.textContent='🏁 まもなく目的地です'; if (l2) l2.textContent=''; }
 
 // ===== カード用：曲率つき矢印（小） =====
+// ===== カード用：曲率つき矢印（小）＋ 進行方向ヘッド =====
 function drawTurnArrow(dir, bendDegRaw){
   const cv = document.getElementById('dn-turn-cv'); if (!cv) return;
   const ctx = cv.getContext('2d'); const W=cv.width, H=cv.height;
   ctx.clearRect(0,0,W,H);
+
   const bend = Math.max(25, Math.min(180, Math.round(bendDegRaw || 90)));
   const sign = (dir==='left' || dir==='slight_left') ? -1 : +1;
 
+  // 基本寸法
   const body=24, outline=body+6, preLen=30, postLen=34, curveLen=46;
   const x0=32, y0=H-20, P1={x:x0,y:y0-preLen};
+
   const rad=bend*Math.PI/180, dirX=Math.sin(rad)*sign, dirY=-Math.cos(rad);
   const kLen=curveLen*(90/bend), P2={x:P1.x+dirX*kLen, y:P1.y+dirY*kLen};
   const cGain=0.55*(bend/90), C1={x:P1.x, y:P1.y-cGain*curveLen}, C2={x:P2.x-dirX*cGain*curveLen, y:P2.y-dirY*cGain*curveLen};
-  const P3={x:P2.x+dirX*postLen, y:P2.y+dirY*postLen};
+  const P3={x:P2.x+dirX*postLen, y:P2.y+dirY*postLen}; // 矢印先端（進行方向）
 
-  const head=(w)=>{ const nx=-dirY, ny=dirX, tip=P3, base={x:P3.x-dirX*(w*1.6), y:P3.y-dirY*(w*1.6)},
+  // 本体（外縁→本体）
+  const headPath=(w)=>{ const nx=-dirY, ny=dirX, tip=P3,
+    base={x:P3.x-dirX*(w*1.65), y:P3.y-dirY*(w*1.65)},
     L={x:base.x+nx*w, y:base.y+ny*w}, R={x:base.x-nx*w, y:base.y-ny*w};
     ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath(); };
 
   const stroke=(w,color)=>{ ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(P1.x,P1.y);
     ctx.bezierCurveTo(C1.x,C1.y,C2.x,C2.y,P2.x,P2.y); ctx.lineTo(P3.x,P3.y);
     ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=color; ctx.lineWidth=w; ctx.stroke();
-    ctx.beginPath(); head(w*0.55); ctx.fillStyle=color; ctx.fill(); };
+    ctx.beginPath(); headPath(w*0.62); ctx.fillStyle=color; ctx.fill(); };
 
-  stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
+  stroke(outline,'#0b3a5a');
+  stroke(body,'#12b24a');
+
+  // ★進行方向インジケータ（白の小さな三角ヘッド／縁取りつき）
+  const iw = Math.max(6, body*0.50);
+  const nx=-dirY, ny=dirX;
+  const tip=P3, base={x:P3.x-dirX*(iw*1.25), y:P3.y-dirY*(iw*1.25)},
+        L={x:base.x+nx*(iw*0.68), y:base.y+ny*(iw*0.68)},
+        R={x:base.x-nx*(iw*0.68), y:base.y-ny*(iw*0.68)};
+  // 縁取り
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
+  // 本体
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+  ctx.fillStyle='#fff'; ctx.fill();
 }
 
-// ===== HUD用：全画面矢印 + 交差点シルエット =====
+
+
+// ===== HUD用：全画面矢印＋交差点シルエット＋進行方向ヘッド =====
 function drawHUD(dir, bendDegRaw, next, dist){
-  const cv = document.getElementById(HUD_ID); if (!cv) return;
+  const cv = document.getElementById('dn-hud-cv'); if (!cv) return;
   const ctx = cv.getContext('2d'); const W=cv.width,H=cv.height;
   ctx.clearRect(0,0,W,H);
-
-  // 背景（HUDは黒前提、透過にしたいならコメントアウト）
   ctx.fillStyle='rgba(0,0,0,0.85)'; ctx.fillRect(0,0,W,H);
 
   const bend = Math.max(25, Math.min(180, Math.round(bendDegRaw || 90)));
   const sign = (dir==='left' || dir==='slight_left') ? -1 : +1;
 
-  // 基本寸法（画面に応じスケール）
   const S = Math.min(W,H);
   const body = Math.max(18, Math.round(S*0.06));
   const outline = body + Math.round(body*0.28);
@@ -225,49 +244,50 @@ function drawHUD(dir, bendDegRaw, next, dist){
   const postLen= Math.round(S*0.20);
   const curveLen=Math.round(S*0.26);
 
-  const cx = Math.round(W*0.38), cy = Math.round(H*0.72); // 始点（少し左下）
+  const cx = Math.round(W*0.38), cy = Math.round(H*0.72);
   const x0=cx, y0=cy, P1={x:x0,y:y0-preLen};
+
   const rad=bend*Math.PI/180, dirX=Math.sin(rad)*sign, dirY=-Math.cos(rad);
   const kLen=curveLen*(90/bend), P2={x:P1.x+dirX*kLen, y:P1.y+dirY*kLen};
   const cGain=0.55*(bend/90), C1={x:P1.x, y:P1.y-cGain*curveLen}, C2={x:P2.x-dirX*cGain*curveLen, y:P2.y-dirY*cGain*curveLen};
   const P3={x:P2.x+dirX*postLen, y:P2.y+dirY*postLen};
 
-  // 交差点バー（T字／十字）
+  // 交差点バー
   const inter = classifyIntersection(next);
-  const barW = outline; // バーの太さ＝外縁と同じくらい
+  const barW = outline;
   if (inter!=='none'){
-    ctx.save();
-    // バー中心はカーブ終点近く（P2）に配置し、曲がり方向に合わせて回転
-    ctx.translate(P2.x, P2.y);
-    const rot = Math.atan2(dirY, dirX); // 進行方向
-    ctx.rotate(rot);
-    ctx.fillStyle = 'rgba(255,255,255,0.18)';
-    // 十字：横棒、T字：横棒のみ（上に進む道なし）
-    const len = Math.round(S*0.22);
-    // 横棒
-    ctx.fillRect(-len, -barW/2, len*2, barW);
-    if (inter==='cross'){
-      // 縦棒（薄め）
-      ctx.fillRect(-barW/2, -len, barW, len*2);
-    }
+    ctx.save(); ctx.translate(P2.x, P2.y); ctx.rotate(Math.atan2(dirY, dirX));
+    ctx.fillStyle='rgba(255,255,255,0.18)';
+    const len=Math.round(S*0.22);
+    ctx.fillRect(-len, -barW/2, len*2, barW); // 横棒
+    if (inter==='cross'){ ctx.fillRect(-barW/2, -len, barW, len*2); } // 十字
     ctx.restore();
   }
 
-  // 矢印本体
-  const head=(w)=>{ const nx=-dirY, ny=dirX, tip=P3, base={x:P3.x-dirX*(w*1.65), y:P3.y-dirY*(w*1.65)},
+  // 胴体
+  const headPath=(w)=>{ const nx=-dirY, ny=dirX, tip=P3,
+    base={x:P3.x-dirX*(w*1.65), y:P3.y-dirY*(w*1.65)},
     L={x:base.x+nx*w, y:base.y+ny*w}, R={x:base.x-nx*w, y:base.y-ny*w};
     ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath(); };
   const stroke=(w,color)=>{ ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(P1.x,P1.y);
     ctx.bezierCurveTo(C1.x,C1.y,C2.x,C2.y,P2.x,P2.y); ctx.lineTo(P3.x,P3.y);
     ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=color; ctx.lineWidth=w; ctx.stroke();
-    ctx.beginPath(); head(w*0.6); ctx.fillStyle=color; ctx.fill(); };
+    ctx.beginPath(); headPath(w*0.62); ctx.fillStyle=color; ctx.fill(); };
   stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
 
-  // 距離・文言（右側）
-  const text = {
-    left:'左折', right:'右折', slight_left:'やや左', slight_right:'やや右',
-    uturn:'Uターン', arrive:'目的地'
-  }[next.type] || '道なり';
+  // ★進行方向インジケータ（白いヘッド・縁取り）
+  const iw = Math.max(10, Math.round(body*0.9));
+  const nx=-dirY, ny=dirX;
+  const tip=P3, base={x:P3.x-dirX*(iw*1.25), y:P3.y-dirY*(iw*1.25)},
+        L={x:base.x+nx*(iw*0.70), y:base.y+ny*(iw*0.70)},
+        R={x:base.x-nx*(iw*0.70), y:base.y-ny*(iw*0.70)};
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+  ctx.fillStyle='#fff'; ctx.fill();
+
+  // 右側の距離・文言
+  const text = {left:'左折', right:'右折', slight_left:'やや左', slight_right:'やや右', uturn:'Uターン', arrive:'目的地'}[next.type] || '道なり';
   ctx.fillStyle='#fff';
   ctx.font = `600 ${Math.round(S*0.08)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
@@ -275,6 +295,9 @@ function drawHUD(dir, bendDegRaw, next, dist){
   ctx.font = `500 ${Math.round(S*0.06)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
   ctx.fillText(text, Math.round(W*0.55), Math.round(H*0.62));
 }
+
+
+  
 function classifyIntersection(next){
   if (!next || next.type==='arrive') return 'none';
   const abs = Math.abs(next.angle||0);
@@ -282,6 +305,7 @@ function classifyIntersection(next){
   if (abs >= 50)  return 'cross';  // 十字（標準の左/右折）
   return 'none';                    // ゆるカーブはバー無し
 }
+
 function drawHUDIdle(){
   const cv = document.getElementById(HUD_ID); if (!cv) return;
   const ctx = cv.getContext('2d'); const W=cv.width,H=cv.height;
@@ -342,6 +366,7 @@ function hapticNow(next){
 // ===== グローバルフォールバック =====
 window.DN_initTurnEngine = initTurnEngine;
 window.DN_onGpsTurnUpdate = onGpsTurnUpdate;
+
 
 
 
