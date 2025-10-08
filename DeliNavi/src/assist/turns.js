@@ -1,22 +1,26 @@
 // src/assist/turns.js
-// --- シンプルなターンバイターンβ ---
-// ・公式ルート上の角度変化から「左/右/やや左/やや右/UTurn/到着」を抽出
-// ・次の曲がりまでの距離を表示（下部HUD）
-// ・250m/80m/直前で音声+バイブ案内
-// ・ラベル「前→次」の確定時に、区間(prevRec→nextRec)をセットして案内更新
+// ターンバイターンβ + HUD連動（曲率つき矢印＆交差点シルエット）
+//
+// ・下部カード用の小型Canvas（既存）＋ HUD全画面用Canvas（新規）
+// ・角度に応じて L字／ゆるカーブ／Uターンを描画
+// ・|角度|>=135° を「T字」に分類して、交差点バー（横棒）を表示
+// ・|角度|>=50° を「十字（左/右折）」としてバー表示、<50° はゆるカーブ
+// ・HUDは body.hud クラスで自動切替（長押しトグルが既にあればそれと連動）
+//
+// 公開関数：initTurnEngine(routePoints), onGpsTurnUpdate(pos)
+// ラベル切替時は window.DN_setTurnLeg(prevRec, nowRec) を呼んでください（既に組み込み済み）
 
 let R = [];        // 公式ルート: [{lat,lng}, ...]
 let S = [0];       // 累積距離[m]
 let ready = false;
 
-let leg = null;    // 現在の区間 {startIdx,endIdx,mans:[{i,lat,lng,type,angle}], nextIdx, spokenStage}
+let leg = null;    // {startIdx,endIdx,mans:[{i,lat,lng,type,angle}], nextIdx, spokenStage}
 const STAGES = [250, 80, 25];  // しきい値[m]
 const PASS_RADIUS_M = 18;      // 曲がり通過許容[m]
 const UI_ID = 'dn-turn-card';
+const HUD_ID = 'dn-hud-cv';
 
-// ===== 公開API =====
 export function initTurnEngine(routePoints){
-  // ルート正規化
   R = Array.isArray(routePoints) ? routePoints
     .map(p => ({ lat: Number(p.lat), lng: Number(p.lng) }))
     .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng)) : [];
@@ -25,9 +29,9 @@ export function initTurnEngine(routePoints){
   ready = R.length > 2;
 
   installUI();
+  installHUD();
 
-  // 他ファイルから呼べるように（ラベル切替で区間確定）
-  window.DN_setTurnLeg = setLegByRecords;
+  window.DN_setTurnLeg = setLegByRecords; // ラベル切替側から呼ぶ
 }
 
 export function onGpsTurnUpdate(pos){
@@ -39,7 +43,7 @@ export function onGpsTurnUpdate(pos){
   const here = {lat, lng};
   const hi = nearestIdx(here);
 
-  // 直近の曲がりを通過していたら次へ
+  // 直近曲がり通過チェック
   while (leg.nextIdx < leg.mans.length) {
     const m = leg.mans[leg.nextIdx];
     const passedByIndex = (hi >= m.i - 2);
@@ -61,17 +65,16 @@ export function onGpsTurnUpdate(pos){
   }
 }
 
-// ===== 区間セット（prevRec, nextRec を渡す） =====
+// ===== 区間セット =====
 function setLegByRecords(prevRec, nextRec){
   if (!ready || !nextRec || !Number.isFinite(nextRec.lat) || !Number.isFinite(nextRec.lng)) {
-    leg = null; updateUIIdle(); return;
+    leg = null; updateUIIdle(); drawHUDIdle(); return;
   }
   let si, ei;
   if (prevRec && Number.isFinite(prevRec.lat) && Number.isFinite(prevRec.lng)){
     si = nearestIdx({lat:prevRec.lat, lng:prevRec.lng});
     ei = nearestIdx({lat:nextRec.lat, lng:nextRec.lng});
   } else {
-    // 最初の1件だけ、手前30点ぶんを区間に含めて案内開始
     ei = nearestIdx({lat:nextRec.lat, lng:nextRec.lng});
     si = Math.max(0, ei - 30);
   }
@@ -84,57 +87,36 @@ function setLegByRecords(prevRec, nextRec){
 // ===== 曲がり抽出 =====
 function buildManeuvers(si, ei){
   const out=[];
-  // 角度の安定化（3点平均ベクトル）
   for(let i=Math.max(si+1,1); i<=Math.min(ei-1, R.length-2); i++){
     const a = bearing(smooth(i-1), smooth(i));
     const b = bearing(smooth(i),   smooth(i+1));
     let ang = norm180(b - a); // -180..+180
     const abs = Math.abs(ang);
-    if (abs < 25) continue; // 小さい変化は「道なり」で無視
+    if (abs < 25) continue; // 道なり
     let type;
     if (abs > 160) type = 'uturn';
     else if (abs >= 50) type = (ang < 0 ? 'left' : 'right');
     else type = (ang < 0 ? 'slight_left' : 'slight_right');
     out.push({ i, lat:R[i].lat, lng:R[i].lng, type, angle:ang });
   }
-  // 到着を末尾に追加
   out.push({ i:ei, lat:R[ei].lat, lng:R[ei].lng, type:'arrive', angle:0 });
   return out;
 
   function smooth(k){
     const i0 = Math.max(0, k-1), i1=k, i2=Math.min(R.length-1, k+1);
-    return {
-      lat:(R[i0].lat+R[i1].lat+R[i2].lat)/3,
-      lng:(R[i0].lng+R[i1].lng+R[i2].lng)/3
-    };
+    return { lat:(R[i0].lat+R[i1].lat+R[i2].lat)/3, lng:(R[i0].lng+R[i1].lng+R[i2].lng)/3 };
   }
 }
 
-// ===== 近傍探索・測地ヘルパ =====
-function nearestIdx(p){
-  let best=0, bd=Infinity;
-  for(let i=0;i<R.length;i++){
-    const di = hav(p, R[i]);
-    if (di < bd){ bd=di; best=i; }
-  }
-  return best;
-}
-function hav(a,b){ // Haversine 距離[m]
-  const toR=x=>x*Math.PI/180, Rm=6371000;
-  const dφ=toR(b.lat-a.lat), dλ=toR(b.lng-a.lng);
-  const s=Math.sin(dφ/2)**2 + Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dλ/2)**2;
-  return 2*Rm*Math.asin(Math.sqrt(s));
-}
-function bearing(a,b){ // 0..360
-  const toR=x=>x*Math.PI/180, toD=r=>r*180/Math.PI;
-  const φ1=toR(a.lat), φ2=toR(b.lat), Δλ=toR(b.lng-a.lng);
-  const y=Math.sin(Δλ)*Math.cos(φ2);
-  const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
-  return (toD(Math.atan2(y,x))+360)%360;
-}
+// ===== 近傍探索・測地 =====
+function nearestIdx(p){ let best=0,bd=Infinity; for(let i=0;i<R.length;i++){const di=hav(p,R[i]); if(di<bd){bd=di;best=i;}} return best; }
+function hav(a,b){ const toR=x=>x*Math.PI/180,Rm=6371000; const dφ=toR(b.lat-a.lat), dλ=toR(b.lng-a.lng);
+  const s=Math.sin(dφ/2)**2 + Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dλ/2)**2; return 2*Rm*Math.asin(Math.sqrt(s)); }
+function bearing(a,b){ const toR=x=>x*Math.PI/180,toD=r=>r*180/Math.PI; const φ1=toR(a.lat),φ2=toR(b.lat),Δλ=toR(b.lng-a.lng);
+  const y=Math.sin(Δλ)*Math.cos(φ2), x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ); return (toD(Math.atan2(y,x))+360)%360; }
 function norm180(a){ return ((a+180)%360+360)%360-180; }
 
-// ===== UI（下部HUD + 曲率付き矢印Canvas） =====
+// ===== UI（下部カード + HUD） =====
 function installUI(){
   if (document.getElementById(UI_ID)) return;
   const el = document.createElement('div');
@@ -142,21 +124,45 @@ function installUI(){
   el.style.cssText = 'position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9500;padding:10px 14px;border-radius:12px;background:rgba(0,0,0,.85);color:#fff;min-width:240px;box-shadow:0 10px 24px rgba(0,0,0,.35);font:600 16px/1.25 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",sans-serif;text-align:center;pointer-events:none;display:flex;gap:10px;align-items:center;justify-content:center';
   el.innerHTML =
     '<canvas id="dn-turn-cv" width="164" height="164" style="width:82px;height:82px" aria-hidden="true"></canvas>' +
-    '<div style="text-align:left"><div id="dn-turn-line1" ...></div> ...';
+    '<div style="text-align:left"><div id="dn-turn-line1" style="font-size:18px"></div><div id="dn-turn-line2" style="opacity:.85;font-size:13px;margin-top:3px"></div></div>';
   document.body.appendChild(el);
 }
+function installHUD(){
+  if (document.getElementById(HUD_ID)) return;
+  const cv = document.createElement('canvas');
+  cv.id = HUD_ID;
+  cv.setAttribute('aria-hidden','true');
+  Object.assign(cv.style, {
+    position:'fixed', inset:'0', zIndex:9000, pointerEvents:'none', display:'none'
+  });
+  document.body.appendChild(cv);
+  const resize = ()=>{ cv.width = window.innerWidth; cv.height = window.innerHeight; };
+  resize(); window.addEventListener('resize', resize);
+}
+function isHud(){ return document.body.classList.contains('hud'); }
+function showCard(show){ const el = document.getElementById(UI_ID); if(el) el.style.display = show ? 'flex':'none'; }
+function showHUD(show){ const cv = document.getElementById(HUD_ID); if(cv) cv.style.display = show ? 'block':'none'; }
+
 function updateUIFromNext(){
-  if (!leg || !leg.mans.length) { updateUIIdle(); return; }
+  if (!leg || !leg.mans.length) { updateUIIdle(); drawHUDIdle(); return; }
   updateUI(leg.mans[0], 0);
 }
 function updateUI(next, dist){
-  // 方向+曲率をCanvasへ
+  // HUD/カードの表示切り替え
+  const hud = isHud();
+  showHUD(hud); showCard(!hud);
+
+  // 方向/曲率
   const dir = next.type.includes('left') ? 'left'
             : next.type.includes('right') ? 'right'
-            : (next.type==='uturn' ? 'right' : 'right'); // Uターンは右基準で大カーブ
+            : (next.type==='uturn' ? 'right' : 'right');
   const bend = next.type==='arrive' ? 0 : Math.abs(next.angle||90);
-  drawTurnArrow(dir, bend);
 
+  // 描画
+  if (hud) drawHUD(dir, bend, next, dist);
+  drawTurnArrow(dir, bend); // カード側は常に更新（HUD時は非表示）
+
+  // テキスト（カード側のみ）
   const l1 = document.getElementById('dn-turn-line1');
   const l2 = document.getElementById('dn-turn-line2');
   const text = {
@@ -164,93 +170,139 @@ function updateUI(next, dist){
     uturn:'Uターン', arrive:'目的地'
   }[next.type] || '道なり';
   const dTxt = `${Math.max(0, Math.round(dist))}m 先`;
-  l1.textContent = (next.type==='arrive') ? '🏁 まもなく目的地です' : `${dTxt}、${text}`;
-  l2.textContent = hintText(next.type);
+  if (l1) l1.textContent = (next.type==='arrive') ? '🏁 まもなく目的地です' : `${dTxt}、${text}`;
+  if (l2) l2.textContent = hintText(next.type);
 }
-function updateUIIdle(){
-  const l1 = document.getElementById('dn-turn-line1');
-  const l2 = document.getElementById('dn-turn-line2');
-  if (l1) l1.textContent = '案内待機中';
-  if (l2) l2.textContent = '';
+function updateUIIdle(){ const l1=document.getElementById('dn-turn-line1'); const l2=document.getElementById('dn-turn-line2');
+  if (l1) l1.textContent='案内待機中'; if (l2) l2.textContent=''; }
+function updateUIArrive(){ const l1=document.getElementById('dn-turn-line1'); const l2=document.getElementById('dn-turn-line2');
+  if (l1) l1.textContent='🏁 まもなく目的地です'; if (l2) l2.textContent=''; }
+
+// ===== カード用：曲率つき矢印（小） =====
+function drawTurnArrow(dir, bendDegRaw){
+  const cv = document.getElementById('dn-turn-cv'); if (!cv) return;
+  const ctx = cv.getContext('2d'); const W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  const bend = Math.max(25, Math.min(180, Math.round(bendDegRaw || 90)));
+  const sign = (dir==='left' || dir==='slight_left') ? -1 : +1;
+
+  const body=24, outline=body+6, preLen=30, postLen=34, curveLen=46;
+  const x0=32, y0=H-20, P1={x:x0,y:y0-preLen};
+  const rad=bend*Math.PI/180, dirX=Math.sin(rad)*sign, dirY=-Math.cos(rad);
+  const kLen=curveLen*(90/bend), P2={x:P1.x+dirX*kLen, y:P1.y+dirY*kLen};
+  const cGain=0.55*(bend/90), C1={x:P1.x, y:P1.y-cGain*curveLen}, C2={x:P2.x-dirX*cGain*curveLen, y:P2.y-dirY*cGain*curveLen};
+  const P3={x:P2.x+dirX*postLen, y:P2.y+dirY*postLen};
+
+  const head=(w)=>{ const nx=-dirY, ny=dirX, tip=P3, base={x:P3.x-dirX*(w*1.6), y:P3.y-dirY*(w*1.6)},
+    L={x:base.x+nx*w, y:base.y+ny*w}, R={x:base.x-nx*w, y:base.y-ny*w};
+    ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath(); };
+
+  const stroke=(w,color)=>{ ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(P1.x,P1.y);
+    ctx.bezierCurveTo(C1.x,C1.y,C2.x,C2.y,P2.x,P2.y); ctx.lineTo(P3.x,P3.y);
+    ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=color; ctx.lineWidth=w; ctx.stroke();
+    ctx.beginPath(); head(w*0.55); ctx.fillStyle=color; ctx.fill(); };
+
+  stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
 }
-function updateUIArrive(){
-  const l1 = document.getElementById('dn-turn-line1');
-  const l2 = document.getElementById('dn-turn-line2');
-  if (l1) l1.textContent = '🏁 まもなく目的地です';
-  if (l2) l2.textContent = '';
+
+// ===== HUD用：全画面矢印 + 交差点シルエット =====
+function drawHUD(dir, bendDegRaw, next, dist){
+  const cv = document.getElementById(HUD_ID); if (!cv) return;
+  const ctx = cv.getContext('2d'); const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+
+  // 背景（HUDは黒前提、透過にしたいならコメントアウト）
+  ctx.fillStyle='rgba(0,0,0,0.85)'; ctx.fillRect(0,0,W,H);
+
+  const bend = Math.max(25, Math.min(180, Math.round(bendDegRaw || 90)));
+  const sign = (dir==='left' || dir==='slight_left') ? -1 : +1;
+
+  // 基本寸法（画面に応じスケール）
+  const S = Math.min(W,H);
+  const body = Math.max(18, Math.round(S*0.06));
+  const outline = body + Math.round(body*0.28);
+  const preLen = Math.round(S*0.18);
+  const postLen= Math.round(S*0.20);
+  const curveLen=Math.round(S*0.26);
+
+  const cx = Math.round(W*0.38), cy = Math.round(H*0.72); // 始点（少し左下）
+  const x0=cx, y0=cy, P1={x:x0,y:y0-preLen};
+  const rad=bend*Math.PI/180, dirX=Math.sin(rad)*sign, dirY=-Math.cos(rad);
+  const kLen=curveLen*(90/bend), P2={x:P1.x+dirX*kLen, y:P1.y+dirY*kLen};
+  const cGain=0.55*(bend/90), C1={x:P1.x, y:P1.y-cGain*curveLen}, C2={x:P2.x-dirX*cGain*curveLen, y:P2.y-dirY*cGain*curveLen};
+  const P3={x:P2.x+dirX*postLen, y:P2.y+dirY*postLen};
+
+  // 交差点バー（T字／十字）
+  const inter = classifyIntersection(next);
+  const barW = outline; // バーの太さ＝外縁と同じくらい
+  if (inter!=='none'){
+    ctx.save();
+    // バー中心はカーブ終点近く（P2）に配置し、曲がり方向に合わせて回転
+    ctx.translate(P2.x, P2.y);
+    const rot = Math.atan2(dirY, dirX); // 進行方向
+    ctx.rotate(rot);
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    // 十字：横棒、T字：横棒のみ（上に進む道なし）
+    const len = Math.round(S*0.22);
+    // 横棒
+    ctx.fillRect(-len, -barW/2, len*2, barW);
+    if (inter==='cross'){
+      // 縦棒（薄め）
+      ctx.fillRect(-barW/2, -len, barW, len*2);
+    }
+    ctx.restore();
+  }
+
+  // 矢印本体
+  const head=(w)=>{ const nx=-dirY, ny=dirX, tip=P3, base={x:P3.x-dirX*(w*1.65), y:P3.y-dirY*(w*1.65)},
+    L={x:base.x+nx*w, y:base.y+ny*w}, R={x:base.x-nx*w, y:base.y-ny*w};
+    ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath(); };
+  const stroke=(w,color)=>{ ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(P1.x,P1.y);
+    ctx.bezierCurveTo(C1.x,C1.y,C2.x,C2.y,P2.x,P2.y); ctx.lineTo(P3.x,P3.y);
+    ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=color; ctx.lineWidth=w; ctx.stroke();
+    ctx.beginPath(); head(w*0.6); ctx.fillStyle=color; ctx.fill(); };
+  stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
+
+  // 距離・文言（右側）
+  const text = {
+    left:'左折', right:'右折', slight_left:'やや左', slight_right:'やや右',
+    uturn:'Uターン', arrive:'目的地'
+  }[next.type] || '道なり';
+  ctx.fillStyle='#fff';
+  ctx.font = `600 ${Math.round(S*0.08)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.fillText(`${Math.max(0,Math.round(dist))}m`, Math.round(W*0.55), Math.round(H*0.54));
+  ctx.font = `500 ${Math.round(S*0.06)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
+  ctx.fillText(text, Math.round(W*0.55), Math.round(H*0.62));
 }
+function classifyIntersection(next){
+  if (!next || next.type==='arrive') return 'none';
+  const abs = Math.abs(next.angle||0);
+  if (abs >= 135) return 'T';      // T字寄り
+  if (abs >= 50)  return 'cross';  // 十字（標準の左/右折）
+  return 'none';                    // ゆるカーブはバー無し
+}
+function drawHUDIdle(){
+  const cv = document.getElementById(HUD_ID); if (!cv) return;
+  const ctx = cv.getContext('2d'); const W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  if (!isHud()) return;
+  ctx.fillStyle='rgba(0,0,0,0.85)'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#fff';
+  ctx.font = `600 ${Math.round(Math.min(W,H)*0.08)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('案内待機中', W/2, H*0.55);
+}
+
 function hintText(type){
   if (type==='arrive') return '安全に停車して配達を完了してください';
   if (type==='uturn')  return '安全を確認し、可能なら転回';
   return '周囲と歩行者にご注意ください';
 }
 
-// ===== 曲率付きターン矢印(Canvas) =====
-function drawTurnArrow(dir/*'left'|'right'|'uturn'|'slight_left'|'slight_right'*/, bendDegRaw){
-  const cv = document.getElementById('dn-turn-cv');
-  if (!cv) return;
-  const ctx = cv.getContext('2d');
-  const W = cv.width, H = cv.height;
-  ctx.clearRect(0,0,W,H);
-
-  const bend = Math.max(25, Math.min(180, Math.round(bendDegRaw || 90)));
-  const sign = (dir==='left' || dir==='slight_left') ? -1 : +1;
-
-  // 基本寸法
-  const body = 24;
-  const outline = body + 6;
-  const preLen = 30;
-  const postLen = 34;
-  const curveLen = 46;
-
-  // Y上向きを基準に右へ曲がる（左は左右反転）
-  const x0 = 32, y0 = H-20;
-  const P1 = {x:x0, y:y0-preLen};
-
-  const rad = bend * Math.PI/180;
-  const dirX =  Math.sin(rad) * sign;
-  const dirY = -Math.cos(rad);
-
-  const kLen = curveLen * (90/bend);
-  const P2 = {x:P1.x + dirX*kLen, y:P1.y + dirY*kLen};
-
-  const cGain = 0.55 * (bend/90);
-  const C1 = {x:P1.x, y:P1.y - cGain*curveLen};
-  const C2 = {x:P2.x - dirX*cGain*curveLen, y:P2.y - dirY*cGain*curveLen};
-
-  const P3 = {x:P2.x + dirX*postLen, y:P2.y + dirY*postLen};
-
-  const head = (ctx, w)=>{
-    const nx = -dirY, ny = dirX;
-    const tip = P3;
-    const base = {x:P3.x - dirX*(w*1.6), y:P3.y - dirY*(w*1.6)};
-    const L = {x:base.x + nx*w, y:base.y + ny*w};
-    const R = {x:base.x - nx*w, y:base.y - ny*w};
-    ctx.moveTo(tip.x, tip.y); ctx.lineTo(L.x, L.y); ctx.lineTo(R.x, R.y); ctx.closePath();
-  };
-
-  const strokePath = (w, color)=>{
-    ctx.beginPath();
-    ctx.moveTo(x0, y0);
-    ctx.lineTo(P1.x, P1.y);
-    ctx.bezierCurveTo(C1.x, C1.y, C2.x, C2.y, P2.x, P2.y);
-    ctx.lineTo(P3.x, P3.y);
-    ctx.lineCap='round'; ctx.lineJoin='round';
-    ctx.strokeStyle = color; ctx.lineWidth = w;
-    ctx.stroke();
-    ctx.beginPath(); head(ctx, w*0.55);
-    ctx.fillStyle = color; ctx.fill();
-  };
-
-  strokePath(outline, '#0b3a5a');  // 濃紺の縁
-  strokePath(body,    '#12b24a');  // 緑の本体
-}
-
 // ===== 音声・バイブ =====
 function maybeSpeak(next, dist){
-  const stage = (dist > STAGES[0]) ? 0
-              : (dist > STAGES[1]) ? 1
-              : (dist > STAGES[2]) ? 2 : 3; // 3=直前
+  const stage = (dist > STAGES[0]) ? 0 : (dist > STAGES[1]) ? 1 : (dist > STAGES[2]) ? 2 : 3;
   if (stage !== leg.spokenStage){
     leg.spokenStage = stage;
     const text = ttsText(next.type, dist);
@@ -272,12 +324,8 @@ function ttsText(type, dist){
   }
 }
 function speak(text){
-  try{
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP'; u.rate = 1; u.pitch = 1; u.volume = 1;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  }catch{}
+  try{ const u=new SpeechSynthesisUtterance(text); u.lang='ja-JP'; u.rate=1; u.pitch=1; u.volume=1;
+    speechSynthesis.cancel(); speechSynthesis.speak(u); }catch{}
 }
 function hapticPre(next){
   if (!navigator.vibrate) return;
@@ -291,7 +339,9 @@ function hapticNow(next){
   else if (next.type==='uturn') navigator.vibrate([250,80,250,80,500]);
 }
 
-// ===== グローバルフォールバック（念のため） =====
+// ===== グローバルフォールバック =====
 window.DN_initTurnEngine = initTurnEngine;
 window.DN_onGpsTurnUpdate = onGpsTurnUpdate;
+
+
 
