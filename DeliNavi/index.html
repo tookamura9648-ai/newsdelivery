@@ -423,8 +423,12 @@
 
     // ====== ポップアップ ======
     function showArrive(d){
+      const now = new Date(); // 現在の時刻を取得
+      const formattedTime = now.toLocaleString(); // 時刻をフォーマット
       const html = `<div><strong>到着:</strong> ${d.name||''}<br>
-        緯度:${Number.isFinite(d.lat)?d.lat.toFixed(6):'-'} / 経度:${Number.isFinite(d.lng)?d.lng.toFixed(6):'-'}</div>`;
+        緯度:${Number.isFinite(d.lat)?d.lat.toFixed(6):'-'} / 経度:${Number.isFinite(d.lng)?d.lng.toFixed(6):'-'}<br>
+        ${formattedtime}
+        </div>`;
       if (Number.isFinite(d.lat) && Number.isFinite(d.lng)){
         L.popup().setLatLng([d.lat,d.lng]).setContent(html).openOn(map);
       }
