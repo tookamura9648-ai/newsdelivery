@@ -35,11 +35,15 @@
     .small{font-size:12px;color:#666}
 
     /* ===== 順路カード（画面下） ===== */
+    /* 順路カードの高さを矢印ラベルに合わせて揃える */
     .route-card{
-      position:fixed; left:8px; right:8px; bottom:8px; z-index:9500;
-      background:rgba(0,0,0,.82); color:#fff; border-radius:14px;
-      padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
-      display:flex; align-items:center; gap:10px; backdrop-filter:saturate(1.2) blur(2px);
+      min-height: 92px;            /* ← お好みで 88–100px 程度に調整可 */
+    }
+    .route-card .meta{
+      display: flex;
+      flex-direction: column;
+      justify-content: center;     /* 高さに合わせて縦中央寄せ */
+      min-height: inherit;
     }
     .route-card .meta{flex:1 1 auto; min-width:0}
     .route-card .title{font-weight:800; font-size:20px; line-height:1.2; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
@@ -49,6 +53,7 @@
 
     /* HUD中はカード非表示 */
     body.hud .route-card{ display:none }
+    
 
     /* 地図上の矢印オーバレイ */
     .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
@@ -61,6 +66,8 @@
     /* HUD上下反転オプション */
     #dn-hud-cv { transition: transform .15s ease; }
     body.hud-flip #dn-hud-cv { transform: rotate(180deg); }
+    /* 既存の白いターンカード要素があれば強制で隠す */
+    #dn-turn-card { display: none !important; }
   </style>
 </head>
 <body>
