@@ -148,31 +148,29 @@ function updateUIFromNext(){
   updateUI(leg.mans[0], 0);
 }
 function updateUI(next, dist){
-  // HUD/カードの表示切り替え
   const hud = isHud();
   showHUD(hud); showCard(!hud);
 
-  // 方向/曲率
   const dir = next.type.includes('left') ? 'left'
             : next.type.includes('right') ? 'right'
             : (next.type==='uturn' ? 'right' : 'right');
   const bend = next.type==='arrive' ? 0 : Math.abs(next.angle||90);
 
-  // 描画
-  if (hud) drawHUD(dir, bend, next, dist);
-  drawTurnArrow(dir, bend); // カード側は常に更新（HUD時は非表示）
+  // === 地図上オーバレイ：近づいたら表示、曲がり終われば消す ===
+  updateMapOverlay(dir, bend, next, dist);
 
-  // テキスト（カード側のみ）
+  // 小カード側の矢印（HUD時は非表示だが常に描画してOK）
+  drawTurnArrow(dir, bend);
+
+  // テキスト（小カード）
   const l1 = document.getElementById('dn-turn-line1');
   const l2 = document.getElementById('dn-turn-line2');
-  const text = {
-    left:'左折', right:'右折', slight_left:'やや左', slight_right:'やや右',
-    uturn:'Uターン', arrive:'目的地'
-  }[next.type] || '道なり';
+  const text = {left:'左折', right:'右折', slight_left:'やや左', slight_right:'やや右', uturn:'Uターン', arrive:'目的地'}[next.type] || '道なり';
   const dTxt = `${Math.max(0, Math.round(dist))}m 先`;
   if (l1) l1.textContent = (next.type==='arrive') ? '🏁 まもなく目的地です' : `${dTxt}、${text}`;
   if (l2) l2.textContent = hintText(next.type);
 }
+
 function updateUIIdle(){ const l1=document.getElementById('dn-turn-line1'); const l2=document.getElementById('dn-turn-line2');
   if (l1) l1.textContent='案内待機中'; if (l2) l2.textContent=''; }
 function updateUIArrive(){ const l1=document.getElementById('dn-turn-line1'); const l2=document.getElementById('dn-turn-line2');
@@ -294,6 +292,17 @@ function drawHUD(dir, bendDegRaw, next, dist){
   ctx.fillText(`${Math.max(0,Math.round(dist))}m`, Math.round(W*0.55), Math.round(H*0.54));
   ctx.font = `500 ${Math.round(S*0.06)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
   ctx.fillText(text, Math.round(W*0.55), Math.round(H*0.62));
+
+    // === 追加：上に氏名、下に備考と「長押しで解除」 ===
+  const rec = (window.DN_destLabelCurrent && window.DN_destLabelCurrent()) || {};
+  const name = rec.name || rec.氏名 || rec.お名前 || '';
+  const note = rec.note || rec.備考 || '';
+  ctx.font = `800 ${Math.round(S*0.07)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
+  ctx.textAlign='center';
+  ctx.fillText(name || '', W/2, Math.round(H*0.13));
+  ctx.font = `500 ${Math.round(S*0.045)}px system-ui, -apple-system, "Noto Sans JP", sans-serif`;
+  ctx.fillText(note || '手動固定: HUD（長押しで解除）', W/2, Math.round(H*0.92));
+
 }
 
 
@@ -366,6 +375,62 @@ function hapticNow(next){
 // ===== グローバルフォールバック =====
 window.DN_initTurnEngine = initTurnEngine;
 window.DN_onGpsTurnUpdate = onGpsTurnUpdate;
+
+// ===== 地図上の大矢印オーバレイ =====
+function updateMapOverlay(dir, bend, next, dist){
+  const host = document.getElementById('turnOverlay');
+  const cv   = document.getElementById('turnOverlayCv');
+  if (!host || !cv) return;
+
+  // 表示条件：案内対象＆距離がしきい値未満
+  const SHOW_TH = 80; // m（好みで調整）
+  const show = (next && next.type!=='arrive' && dist <= SHOW_TH);
+  host.classList.toggle('show', show);
+  if (!show) { const ctx=cv.getContext('2d'); ctx.clearRect(0,0,cv.width,cv.height); return; }
+
+  const ctx = cv.getContext('2d');
+  const W=cv.width, H=cv.height; ctx.clearRect(0,0,W,H);
+
+  // 背景は透過のまま。矢印だけ描画（HUDと同じ色味）
+  const bendDeg = Math.max(25, Math.min(180, Math.round(bend || 90)));
+  const sign = (dir==='left' || dir==='slight_left') ? -1 : +1;
+
+  // 画面中央に大きめ
+  const S = Math.min(W,H);
+  const body = Math.round(S*0.12), outline = Math.round(S*0.12*1.28);
+  const preLen = Math.round(S*0.20), postLen = Math.round(S*0.22), curveLen = Math.round(S*0.30);
+  const x0 = W*0.32, y0 = H*0.78;
+  const P1 = {x:x0, y:y0-preLen};
+
+  const rad = bendDeg*Math.PI/180, dirX=Math.sin(rad)*sign, dirY=-Math.cos(rad);
+  const kLen = curveLen*(90/bendDeg);
+  const P2={x:P1.x+dirX*kLen, y:P1.y+dirY*kLen};
+  const cGain=0.55*(bendDeg/90), C1={x:P1.x, y:P1.y-cGain*curveLen}, C2={x:P2.x-dirX*cGain*curveLen, y:P2.y-dirY*cGain*curveLen};
+  const P3={x:P2.x+dirX*postLen, y:P2.y+dirY*postLen};
+
+  const head=(w)=>{ const nx=-dirY, ny=dirX, tip=P3, base={x:P3.x-dirX*(w*1.65), y:P3.y-dirY*(w*1.65)},
+    L={x:base.x+nx*w, y:base.y+ny*w}, R={x:base.x-nx*w, y:base.y-ny*w};
+    ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath(); };
+  const stroke=(w,color)=>{ ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(P1.x,P1.y);
+    ctx.bezierCurveTo(C1.x,C1.y,C2.x,C2.y,P2.x,P2.y); ctx.lineTo(P3.x,P3.y);
+    ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle=color; ctx.lineWidth=w; ctx.stroke();
+    ctx.beginPath(); head(w*0.62); ctx.fillStyle=color; ctx.fill(); };
+
+  stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
+
+  // 進行方向ヘッド（白）
+  const iw = Math.max(14, Math.round(body*0.85));
+  const nx=-dirY, ny=dirX;
+  const tip=P3, base={x:P3.x-dirX*(iw*1.25), y:P3.y-dirY*(iw*1.25)},
+        L={x:base.x+nx*(iw*0.70), y:base.y+ny*(iw*0.70)},
+        R={x:base.x-nx*(iw*0.70), y:base.y-ny*(iw*0.70)};
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+  ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill(); // 縁取り
+  ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+  ctx.fillStyle='#fff'; ctx.fill();
+}
+
+
 
 
 
