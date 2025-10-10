@@ -40,6 +40,30 @@
 
     /* 番号バッジを常に非表示にする（ツールチップ） */
     .leaflet-tooltip { display: none !important; }
+    /* ===== 順路カード ===== */
+.route-card{
+  position:fixed; left:8px; right:8px; bottom:8px; z-index:9500;
+  background:rgba(0,0,0,.82); color:#fff; border-radius:14px;
+  padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
+  display:flex; align-items:center; gap:10px; backdrop-filter:saturate(1.2) blur(2px);
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans JP",Meiryo,sans-serif;
+}
+.route-card .meta{flex:1 1 auto; min-width:0}
+.route-card .title{font-weight:800; font-size:20px; line-height:1.2; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.route-card .addr{opacity:.95; font-size:13px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.route-card .note{opacity:.85; font-size:12px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px}
+.route-card .menu-btn{flex:0 0 auto; padding:8px 12px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:#07445f; color:#fff; font-weight:700; cursor:pointer}
+
+/* HUD中はカード非表示 */
+body.hud .route-card{ display:none }
+
+/* ===== 地図上の矢印オーバレイ ===== */
+.turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
+.turn-overlay.show{ display:block }
+.turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
+
+/* 既存の番号ツールチップ非表示（念押し） */
+.leaflet-tooltip{ display:none !important }
   </style>
 </head>
 <body>
@@ -92,11 +116,37 @@
     const SPEED_SLOW_KMH = 8;        // 低速判定
     const ARRIVE_COOLDOWN_MS = 10000;// クールダウン
 
+    // === 順路カードの表示更新 ===
+    function renderRouteCard(){
+      const rec = window.DN_destLabelCurrent?.();
+      const addr = rec?.address || rec?.住所 || '';
+      const name = rec?.name || rec?.氏名 || rec?.お名前 || '';
+      const note = rec?.note || rec?.備考 || '';
+      document.getElementById('rcAddr').textContent  = addr || '—';
+      document.getElementById('rcTitle').textContent = name || '—';
+      document.getElementById('rcNote').textContent  = note || '';
+    }
+
+
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([35.0,135.87], 13);
     window.__DN_map = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+    <!-- 地図上の矢印オーバレイ -->
+    <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
+      <canvas id="turnOverlayCv" width="512" height="512"></canvas>
+    </div>
+    
+    <!-- 順路カード（氏名・住所・備考＋Menu） -->
+    <div id="routeCard" class="route-card" role="region" aria-label="次の配達先">
+      <div class="meta">
+        <div id="rcAddr" class="addr">—</div>
+        <div id="rcTitle" class="title">—</div>
+        <div id="rcNote" class="note">—</div>
+      </div>
+      <button id="rcMenu" class="menu-btn">Menu</button>
+    </div>
 
     // Leafletズームボタンのアクセシビリティ名
     const zc = map.zoomControl;
@@ -219,8 +269,16 @@
       })();
 
       setTimeout(()=>refreshCounterAndHighlight(), 0);
+      renderRouteCard();
     }
-
+    
+    document.getElementById('rcMenu').addEventListener('click', ()=>{
+      const p = document.querySelector('.panel');
+      if(!p) return;
+      const show = (p.style.display !== 'block');
+      p.style.display = show ? 'block' : 'none';
+    });
+    
     // ====== カウンタと区間ハイライト ======
     let lastRec = null; // 直前のラベル行
     function stepCSV(delta){
@@ -233,6 +291,7 @@
         map.panTo([rec.lat, rec.lng]);
       }
       refreshCounterAndHighlight(rec, lastRec);
+      renderRouteCard();
     }
     function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
       const idx   = window.DN_destLabelIndex?.() ?? 0;
@@ -243,6 +302,7 @@
 
       updateLegHighlight(prevRec, nowRec); // 区間ハイライト
       window.DN_setTurnLeg && window.DN_setTurnLeg(prevRec, nowRec); // ターン案内
+      renderRouteCard();
     }
 
     // ====== 公式ルート（MultiLine / FeatureCollection 対応） ======
