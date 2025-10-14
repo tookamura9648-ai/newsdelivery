@@ -35,32 +35,20 @@
     .small{font-size:12px;color:#666}
 
     /* ===== 順路カード（画面下） ===== */
-    /* 順路カードの高さを矢印ラベルに合わせて揃える */
-   .route-card{
-      display: flex !important;
-      min-height: 92px;            /* お好みで 88–100px などに調整 */
-    }
-    .route-card .meta{
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      min-height: inherit;
+    .route-card{
+      position:fixed; left:8px; right:8px; bottom:8px; z-index:9500;
+      background:rgba(0,0,0,.82); color:#fff; border-radius:14px;
+      padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
+      display:flex; align-items:center; gap:10px; backdrop-filter:saturate(1.2) blur(2px);
     }
     .route-card .meta{flex:1 1 auto; min-width:0}
     .route-card .title{font-weight:800; font-size:20px; line-height:1.2; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .route-card .addr{opacity:.95; font-size:13px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .route-card .note{opacity:.85; font-size:12px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px}
     .route-card .menu-btn{flex:0 0 auto; padding:8px 12px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:#07445f; color:#fff; font-weight:700; cursor:pointer}
-    /* 黒カードは常に表示＆高さそろえ */
 
-
-    /* 白い小カード（turns.jsが作るやつ）を完全に隠す */
-    #dn-turn-card, .dn-turn-card{
-      display: none !important;
-      visibility: hidden !important;
-      pointer-events: none !important;
-    }
-    
+    /* HUD中はカード非表示 */
+    body.hud .route-card{ display:none }
 
     /* 地図上の矢印オーバレイ */
     .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
@@ -73,8 +61,6 @@
     /* HUD上下反転オプション */
     #dn-hud-cv { transition: transform .15s ease; }
     body.hud-flip #dn-hud-cv { transform: rotate(180deg); }
-    /* 既存の白いターンカード要素があれば強制で隠す */
-    #dn-turn-card { display: none !important; }
   </style>
 </head>
 <body>
@@ -131,8 +117,7 @@
   (function whenReady(fn){
     if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, {once:true});
     else fn();
-  })
-  (function initApp(){
+  })(function initApp(){
 
     // ====== 設定 ======
     const CSV_URL = './assets/data/points.csv'; // 列: name,address,note,lat,lng（日本語列名も対応）
@@ -515,15 +500,6 @@
       ctx.fillStyle='#fff'; ctx.fill();
     };
 
-    // 白い小カードが作られても即除去（保険）
-    (function removeMiniCard(){
-      const kill = ()=> document.getElementById('dn-turn-card')?.remove();
-      kill();
-      const mo = new MutationObserver(kill);
-      mo.observe(document.body, { childList:true, subtree:true });
-    })();
-
-
   }); // initApp
   </script>
 
@@ -531,6 +507,7 @@
   <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
