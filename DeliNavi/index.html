@@ -117,7 +117,8 @@
   (function whenReady(fn){
     if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, {once:true});
     else fn();
-  })(function initApp(){
+  })
+  (function initApp(){
 
     // ====== 設定 ======
     const CSV_URL = './assets/data/points.csv'; // 列: name,address,note,lat,lng（日本語列名も対応）
@@ -127,6 +128,16 @@
     const ARRIVE_DWELL_MS = 2000;   // 到着判定の滞在時間
     const SPEED_SLOW_KMH = 8;       // 低速閾値
     const ARRIVE_COOLDOWN_MS = 10000;
+    // ▼ 追加：アプローチ時ズームの設定
+    const APPROACH_ZOOM_IN_M   = 90;   // 何m以内でズームインするか
+    const APPROACH_ZOOM_LEVEL  = 18;   // ズームイン時の倍率（17〜19あたりが見やすい）
+    const APPROACH_ZOOM_OUT_M  = 140;  // 離れたらズームアウト（ヒステリシス用）
+    const APPROACH_FLY_MS      = 800;  // アニメーション時間(ms)
+    
+    // ▼ 追加：自動ズームの状態
+    let __autoZoomed = false;
+    let __autoZoomPrevZoom = null;
+    let __autoZoomTargetIdx = null; // どの目的地を対象にしているか
 
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([35.0,135.87], 13);
