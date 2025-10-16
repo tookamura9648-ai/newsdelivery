@@ -588,25 +588,44 @@
 
       stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
 
-      // 白ヘッド（進行方向）
-      const iw = Math.max(14, Math.round(body*0.85));
-      const nx=-dirY, ny=dirX;
-      const tip=P3, base={x:P3.x-dirX*(iw*1.25), y:P3.y-dirY*(iw*1.25)},
-            L={x:base.x+nx*(iw*0.70), y:base.y+ny*(iw*0.70)},
-            R={x:base.x-nx*(iw*0.70), y:base.y-ny*(iw*0.70)};
-      ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
-      ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
-      ctx.fillStyle='#fff'; ctx.fill();
-    };
+            // 白ヘッド（進行方向）—— 安全版
+      {
+        const iw = Math.max(14, Math.round(body * 0.85));
+        const nx = -dirY;
+        const ny =  dirX;
+
+        const tip  = P3;
+        const base = { x: P3.x - dirX * (iw * 1.25), y: P3.y - dirY * (iw * 1.25) };
+        const L    = { x: base.x + nx * (iw * 0.70), y: base.y + ny * (iw * 0.70) };
+        const R    = { x: base.x - nx * (iw * 0.70), y: base.y - ny * (iw * 0.70) };
+
+        // 影
+        ctx.beginPath();
+        ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(L.x, L.y);
+        ctx.lineTo(R.x, R.y);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fill();
+
+        // 白
+        ctx.beginPath();
+        ctx.moveTo(tip.x, tip.y);
+        ctx.lineTo(L.x, L.y);
+        ctx.lineTo(R.x, R.y);
+        ctx.closePath();
+        ctx.fillStyle = '#fff';
+        ctx.fill();
+      }
+    }; // ← ここで window.DN_setMapOverlay 関数を閉じる
 
   }); // initApp
   </script>
-
   <!-- Assist（destLabel / turns / rideHud など） -->
   <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
