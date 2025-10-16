@@ -187,6 +187,45 @@
     const $ = s => document.querySelector(s);
     const setStatus = t => $('#status').textContent = t;
 
+    // --- 自動ズーム制御 ---
+      function autoZoomMaybe(distM, hereLatLng){
+        // 現在のターゲット（ラベル側のindexを採用）
+        const idx = window.DN_destLabelIndex?.();
+        if (idx == null) return;
+      
+        // ターゲットが変わったら状態リセット
+        if (__autoZoomTargetIdx !== idx) {
+          autoZoomReset(/*restore=*/false);
+          __autoZoomTargetIdx = idx;
+        }
+      
+        if (!__autoZoomed && distM <= APPROACH_ZOOM_IN_M) {
+          __autoZoomPrevZoom = map.getZoom();
+          __autoZoomed = true;
+          // 現在位置へ軽く寄せる（追従がONなら中心化されます）
+          map.flyTo(hereLatLng, APPROACH_ZOOM_LEVEL, { animate: true, duration: APPROACH_FLY_MS/1000 });
+        }
+      
+        if (__autoZoomed && distM >= APPROACH_ZOOM_OUT_M) {
+          // 近くまで寄った後、十分離れたら戻す
+          autoZoomRestore();
+        }
+      }
+      
+      function autoZoomRestore(){
+        if (!__autoZoomed) return;
+        const z = (__autoZoomPrevZoom ?? 15);
+        __autoZoomed = false;
+        __autoZoomPrevZoom = null;
+        map.flyTo(map.getCenter(), z, { animate: true, duration: APPROACH_FLY_MS/1000 });
+      }
+      
+      function autoZoomReset(restore=true){
+        if (restore) autoZoomRestore();
+        __autoZoomed = false;
+        __autoZoomPrevZoom = null;
+      }
+
     // ====== イベント配線 ======
     $('#btnFit').addEventListener('click', fitAll);
     $('#btnPrev').addEventListener('click', e=>{ e.preventDefault(); stepCSV(-1); });
@@ -314,6 +353,7 @@
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) map.panTo([rec.lat, rec.lng]);
       refreshCounterAndHighlight(rec, lastRec);
       renderRouteCard();
+      autoZoomReset(/*restore=*/true);  // ★ 追加：目的地を切り替えたら倍率を一度戻す
     }
 
     function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
@@ -393,6 +433,7 @@
       const rec = window.DN_destLabelCurrent?.();
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
         const d = distanceMeters(curr, [rec.lat, rec.lng]);
+        autoZoomMaybe(d, curr);  // ★ 追加：残距離に応じて自動ズーム制御
         const acc = accuracy ?? 30;
         const userR = parseFloat($('#radius').value) || 50;
         const autoR = Math.round(acc * 0.6 + 3);
