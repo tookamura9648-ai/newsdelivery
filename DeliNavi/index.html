@@ -49,19 +49,19 @@
         backdrop-filter: saturate(1.2) blur(2px);
       }
     }
-    /*.route-card .meta{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; min-height:inherit}
+    .route-card .meta{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; min-height:inherit}
     .route-card .title{font-weight:800; font-size:20px; line-height:1.2; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .route-card .addr{opacity:.95; font-size:13px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-    .route-card .note{opacity:.85; font-size:12px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px} */
+    .route-card .note{opacity:.85; font-size:12px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px}
     .route-card .menu-btn{flex:0 0 auto; padding:8px 12px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:#07445f; color:#fff; font-weight:700; cursor:pointer}
 
     /* 地図上の大矢印オーバレイ */
-    /*.turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
+    .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
     .turn-overlay.show{ display:block }
-    .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto } */
+    .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
 
     /* Leafletの番号ツールチップは非表示（混雑防止） */
-    /*.leaflet-tooltip{ display:none !important } */
+    .leaflet-tooltip{ display:none !important }
 
     /* HUDのキャンバス反転オプション（必要なら使う） */
     #dn-hud-cv { transition: transform .15s ease; }
@@ -76,9 +76,9 @@
   <div id="map" aria-label="map"></div>
 
   <!-- 地図上の矢印オーバレイ -->
-  <!-- <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
+  <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
     <canvas id="turnOverlayCv" width="512" height="512"></canvas>
-  </div> -->
+  </div>
 
   <!-- 下の順路カード（氏名・住所・備考＋Menu） -->
   <div id="routeCard" class="route-card" role="region" aria-label="次の配達先">
@@ -132,6 +132,9 @@
     const CSV_URL = './assets/data/points.csv'; // name,address,note,lat,lng（日本語列名も可）
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
     const SHOW_PLANNED_LINE = false;
+    // 到着で自動前進する
+    const AUTO_ADVANCE = true;
+
 
     // 到着判定・自動ズーム
     const MIN_RADIUS = 8, ARRIVE_DWELL_MS = 2000, SPEED_SLOW_KMH = 8, ARRIVE_COOLDOWN_MS = 10000;
@@ -185,6 +188,7 @@
 
     // ====== 状態（到着・自動ズーム・コンパス） ======
     let __arriveSinceTs = 0, __arriveCooldownUntil = 0;
+    let __arriveCandidateIdx = null; // その半径に入っている「対象のCSV行」
     let __autoZoomed = false, __autoZoomPrevZoom = null, __autoZoomTargetIdx = null;
     let __compassHeading = null, __headingLPF = null;
 
@@ -314,6 +318,8 @@
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) map.panTo([rec.lat, rec.lng]);
       refreshCounterAndHighlight(rec, lastRec);
       renderRouteCard();
+      __arriveSinceTs = 0;
+      __arriveCandidateIdx = null;   // ← 手動移動時の取りこぼし防止
       autoZoomReset(true); // 切替時は倍率を戻す
     }
 
@@ -396,29 +402,48 @@
       const rec = window.DN_destLabelCurrent?.();
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
         const d = distanceMeters(curr, [rec.lat, rec.lng]);
-        autoZoomMaybe(d, curr); // ← 近づいたらズーム
-
-        const acc = accuracy ?? 30;
+        autoZoomMaybe(d, curr);
+      
+        const acc   = accuracy ?? 30;
         const userR = parseFloat($('#radius').value) || 50;
         const autoR = Math.round(acc * 0.6 + 3);
         const effR  = Math.max(MIN_RADIUS, Math.min(userR, autoR));
-
+      
         const now = performance.now();
-        const speedKmh = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed * 3.6 : null;
-        const isSlow = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
+        const speedKmh   = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed * 3.6 : null;
+        const isSlow     = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
         const cooldownOK = now >= __arriveCooldownUntil;
-
-        if (d <= effR) { if (!__arriveSinceTs) __arriveSinceTs = now; } else { __arriveSinceTs = 0; }
+      
+        // ▼ 追加：今のターゲットIndexを取得
+        const idx = window.DN_destLabelIndex?.();
+      
+        // 半径に入っている／出た の管理（候補idxを記録/破棄）
+        if (d <= effR) {
+          if (!__arriveSinceTs) __arriveSinceTs = now;
+          if (__arriveCandidateIdx == null) __arriveCandidateIdx = idx;   // ← 追加
+        } else {
+          __arriveSinceTs = 0;
+          __arriveCandidateIdx = null;                                     // ← 追加
+        }
+      
         const hasDwelled = __arriveSinceTs && ((now - __arriveSinceTs) >= ARRIVE_DWELL_MS);
         setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m / 判定${effR}m`);
-
-        if (d <= effR && hasDwelled && isSlow && cooldownOK) {
-          ping(); showArrive(rec);
-          __arriveSinceTs = 0; __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
-          autoZoomReset(true); // 到着時に倍率を戻す
+      
+        // 到着確定：候補idxと一致する時だけ一度だけ進める
+        if (d <= effR && hasDwelled && isSlow && cooldownOK && idx === __arriveCandidateIdx) {
+          ping();
+          showArrive(rec);
+          __arriveSinceTs = 0;
+          __arriveCandidateIdx = null;                                     // ← 追加
+          __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
+          autoZoomReset(true);
+      
+          if (AUTO_ADVANCE) {
+            stepCSV(+1);   // ★ 自動で「次へ」
+          }
         }
       }
-    }
+
     function onErr(err){ setStatus('GPSエラー: ' + err.message); }
 
     // ====== コンパス ======
@@ -582,6 +607,7 @@
   <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
