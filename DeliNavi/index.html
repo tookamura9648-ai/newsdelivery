@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>DeliNavi</title>
 
-  <!-- 軽量favicon（ファイル不要） -->
+  <!-- 軽量favicon -->
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E🗺️%3C/text%3E%3C/svg%3E">
 
   <!-- Leaflet -->
@@ -15,7 +15,7 @@
   <script src="https://unpkg.com/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.min.js"></script>
   <!-- CSV -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
-  <!-- QR生成 -->
+  <!-- QR -->
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 
   <style>
@@ -25,7 +25,7 @@
 
     /* 右上の操作パネル */
     .panel{
-      position:relative;z-index:1000;left:10px;top:10px;background:#fff;
+      position:absolute;z-index:1000;left:10px;top:10px;background:#fff;
       padding:10px 12px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.15)
     }
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
@@ -34,47 +34,41 @@
     .badge{background:#111;color:#fff;border-radius:10px;padding:3px 8px;font-weight:700}
     .small{font-size:12px;color:#666}
 
-    /* ===== 順路カード（画面下） ===== */
+    /* ===== 下部の順路カード（黒） ===== */
     .route-card{
-      position:top; left:8px; right:8px; bottom:8px; z-index:9500;
-      background:rgba(0,0,0,.82); color:#fff; border-radius:14px;
-      padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
-      display:flex; align-items:center; gap:10px; background: rgba(0,0,0,.90); 
+      position:fixed; left:8px; right:8px; bottom:8px; z-index:9500;
+      background: rgba(0,0,0,.90);  /* フォールバック */
+      color:#fff; border-radius:14px; padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
+      display:flex !important; align-items:center; gap:10px;
+      min-height:92px;  /* 矢印ラベルと同じ高さに固定 */
     }
-    /* backdrop-filter 対応環境だけ、ぼかし＋彩度UPを有効化 */
     @supports ((-webkit-backdrop-filter: none) or (backdrop-filter: none)) {
       .route-card{
         background: rgba(0,0,0,.82);
-        -webkit-backdrop-filter: saturate(1.2) blur(2px); /* Safari用 */
-        backdrop-filter: saturate(1.2) blur(2px);         /* それ以外 */
+        -webkit-backdrop-filter: saturate(1.2) blur(2px);
+        backdrop-filter: saturate(1.2) blur(2px);
       }
     }
-    .route-card .meta{flex:1 1 auto; min-width:0}
+    .route-card .meta{flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:center; min-height:inherit}
     .route-card .title{font-weight:800; font-size:20px; line-height:1.2; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .route-card .addr{opacity:.95; font-size:13px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
     .route-card .note{opacity:.85; font-size:12px; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px}
     .route-card .menu-btn{flex:0 0 auto; padding:8px 12px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:#07445f; color:#fff; font-weight:700; cursor:pointer}
 
-    /* HUD中はカード非表示 */
-    body.hud .route-card{ display:none }
-    /* 順路カードのテキスト群を非表示、Menuボタンだけ残す */
-    .route-card .meta { display: none !important; }
-    
-    /* ボタンを右下に寄せたい/中央に置きたい場合の例 */
-    .route-card { justify-content: flex-end; }   /* 右寄せ */
-     /* .route-card { justify-content: center; } /* 中央寄せにしたい場合 */
+    /* 地図上の大矢印オーバレイ */
+    .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
+    .turn-overlay.show{ display:block }
+    .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
 
-    /* 地図上の矢印オーバレイ */
-    /* .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
-    /* .turn-overlay.show{ display:block }
-    /* .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
-
-    /* Leafletの番号ツールチップを常に非表示（番号バッジ非表示） */
+    /* Leafletの番号ツールチップは非表示（混雑防止） */
     .leaflet-tooltip{ display:none !important }
 
-    /* HUD上下反転オプション */
+    /* HUDのキャンバス反転オプション（必要なら使う） */
     #dn-hud-cv { transition: transform .15s ease; }
     body.hud-flip #dn-hud-cv { transform: rotate(180deg); }
+
+    /* 白い小カードは常に消す（turns.jsが出しても隠す） */
+    #dn-turn-card, .dn-turn-card{ display:none !important; visibility:hidden !important; pointer-events:none !important; }
   </style>
 </head>
 <body>
@@ -82,11 +76,11 @@
   <div id="map" aria-label="map"></div>
 
   <!-- 地図上の矢印オーバレイ -->
-  <!-- <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
+  <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
     <canvas id="turnOverlayCv" width="512" height="512"></canvas>
-  </div> -->
+  </div>
 
-  <!-- 順路カード（氏名・住所・備考＋Menu） -->
+  <!-- 下の順路カード（氏名・住所・備考＋Menu） -->
   <div id="routeCard" class="route-card" role="region" aria-label="次の配達先">
     <div class="meta">
       <div id="rcAddr"  class="addr">—</div>
@@ -103,13 +97,12 @@
       <button class="btn" id="btnFit">全体表示</button>
       <button class="btn" id="btnPrev" disabled>◀ 前</button>
       <button class="btn" id="btnNext" disabled>次 ▶</button>
+      <button class="btn" id="btnHUD">HUD</button>
       <button class="btn" id="btnQR">QR共有</button>
     </div>
     <div class="row">
       <button class="btn" id="btnGPS">GPS開始</button>
       <button class="btn" id="btnStop" disabled>停止</button>
-      <!-- 例：GPSボタンの隣 -->
-      <button class="btn" id="btnHUD">HUD</button>
       <label class="small">到着半径 <input type="number" id="radius" value="50" style="width:4.5em"> m</label>
     </div>
     <div class="row">
@@ -128,102 +121,41 @@
     </div>
   </div>
 
-  <!-- アプリ本体（JSのみ） -->
+  <!-- アプリ本体 -->
   <script>
   (function whenReady(fn){
     if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn, {once:true});
     else fn();
-  })
-  (function initApp(){
-    // ▼ 追加：HUDは手動のみ
-    const HUD_MANUAL_ONLY = true;
-    
-    // 手動トグル用の関数（他所はこの関数だけ呼ぶ想定）
-    function setHUD(on){
-      document.body.classList.toggle('hud', !!on);
-      localStorage.setItem('dnHudOn', on ? '1' : '0');
-    }
-    
-    // 起動時に前回状態を復元（手動のみ許可）
-    if (localStorage.getItem('dnHudOn') === '1') setHUD(true);
-    
-    // 自動要求が来ても無視する“受け口”（turns.js等から呼ばれても弾く）
-    window.DN_requestHUD = (want)=>{
-      if (!HUD_MANUAL_ONLY) setHUD(!!want); // ← 手動のみなら無視
-    };
+  })(function initApp(){
 
     // ====== 設定 ======
-    const CSV_URL = './assets/data/points.csv'; // 列: name,address,note,lat,lng（日本語列名も対応）
+    const CSV_URL = './assets/data/points.csv'; // name,address,note,lat,lng（日本語列名も可）
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
-    const SHOW_PLANNED_LINE = false; // 予定線ON/OFF
-    const MIN_RADIUS = 8;           // 到着半径の下限
-    const ARRIVE_DWELL_MS = 2000;   // 到着判定の滞在時間
-    const SPEED_SLOW_KMH = 8;       // 低速閾値
-    const ARRIVE_COOLDOWN_MS = 10000;
-    // ▼ 追加：アプローチ時ズームの設定
-    const APPROACH_ZOOM_IN_M   = 90;   // 何m以内でズームインするか
-    const APPROACH_ZOOM_LEVEL  = 18;   // ズームイン時の倍率（17〜19あたりが見やすい）
-    const APPROACH_ZOOM_OUT_M  = 140;  // 離れたらズームアウト（ヒステリシス用）
-    const APPROACH_FLY_MS      = 800;  // アニメーション時間(ms)
-    
-    // ▼ 追加：自動ズームの状態
-    let __autoZoomed = false;
-    let __autoZoomPrevZoom = null;
-    let __autoZoomTargetIdx = null; // どの目的地を対象にしているか
-   
+    const SHOW_PLANNED_LINE = false;
+
+    // 到着判定・自動ズーム
+    const MIN_RADIUS = 8, ARRIVE_DWELL_MS = 2000, SPEED_SLOW_KMH = 8, ARRIVE_COOLDOWN_MS = 10000;
+    const APPROACH_ZOOM_IN_M = 90, APPROACH_ZOOM_OUT_M = 140, APPROACH_ZOOM_LEVEL = 18, APPROACH_FLY_MS = 800;
+
+    // HUDは手動のみ
+    const HUD_MANUAL_ONLY = true;
+
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([35.0,135.87], 13);
-    window.__DN_map = map; // assistモジュール用
+    window.__DN_map = map;
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 
-    // ズームボタンにアクセシビリティ名
+    // アクセシビリティ名
     const zc = map.zoomControl;
-    if (zc && zc._zoomInButton) {
-      zc._zoomInButton.setAttribute('title','拡大'); zc._zoomInButton.setAttribute('aria-label','拡大');
-    }
-    if (zc && zc._zoomOutButton) {
-      zc._zoomOutButton.setAttribute('title','縮小'); zc._zoomOutButton.setAttribute('aria-label','縮小');
-    }
-    // 方位の平滑化（ガタつき防止）
-    let __headingLPF = null;
-    function smoothHeading(deg){
-      if (__headingLPF == null) { __headingLPF = deg; return deg; }
-      // 角度差の最短側で補間
-      const a = __headingLPF, b = deg;
-      let diff = ((b - a + 540) % 360) - 180; // -180..180
-      __headingLPF = (a + diff * 0.25 + 360) % 360; // 係数0.25でスムージング
-      return __headingLPF;
-    }
-    
-    // GPS / 速度 / 直前座標 / コンパスを使って“一番マシ”な方位を返す
-    function getHeadingFromSensors(pos, lastLL, currLL){
-      // 1) 端末が course(=heading) を返していれば最優先
-      const h = pos.coords && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
-    
-      // 2) 速度が遅い/止まっているとGPS方位は不安定 → デバイスコンパスを使う
-      const speed = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed : 0; // m/s
-      const slow  = speed < 1.5; // ~5.4km/h未満を低速扱い
-    
-      let cand = null;
-      if (!slow && h != null) {
-        cand = h; // 走行中はGPSの進行方位が安定
-      } else if (__compassHeading != null) {
-        cand = __compassHeading; // 止まっている/低速時はコンパス
-      } else if (lastLL) {
-        // 3) コンパスがない時のフォールバック：直前座標→現在座標の方位
-        cand = bearing(lastLL, currLL);
-      } else {
-        cand = lastHeading || 0;
-      }
-      return smoothHeading((cand + 360) % 360);
-    }
+    if (zc && zc._zoomInButton) { zc._zoomInButton.setAttribute('title','拡大'); zc._zoomInButton.setAttribute('aria-label','拡大'); }
+    if (zc && zc._zoomOutButton){ zc._zoomOutButton.setAttribute('title','縮小'); zc._zoomOutButton.setAttribute('aria-label','縮小'); }
 
-    // ====== 公式ルート表示 ======
+    // ====== 公式ルート ======
     const officialRouteGroup = L.featureGroup().addTo(map);
     let officialSegments = [], officialRouteFlat = [], legHighlight = null;
 
-    // ====== 目的地（CSV） ======
+    // ====== CSV目的地 ======
     let csvRows = [];
     let destMarkers = [];
     let plannedLayer = null;
@@ -231,7 +163,7 @@
     // ====== 実走ログ ======
     const liveTrack = L.polyline([], {color:'#222', weight:3}).addTo(map);
 
-    // ====== 自位置マーカー ======
+    // ====== 自位置マーカー（進行方向回転） ======
     const userIcon = L.icon({
       iconUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
@@ -240,89 +172,46 @@
              <circle cx="32" cy="32" r="9" fill="#fff"/>
              <polygon points="32,6 44,34 32,28 20,34" fill="#007aff"/>
            </g>
-         </svg>`
-      ),
+         </svg>`),
       iconSize:[44,44], iconAnchor:[22,22]
     });
     let userMarker = null, userAccCircle = null;
     let followMode = true, rotateToHeading = true;
     let lastLatLng = null, lastHeading = 0;
-    // 既存の userIcon はそのままでOK
-    if (!userMarker) {
-      userMarker = L.marker(curr, {
-        icon: userIcon,
-        rotationAngle: 0,
-        rotationOrigin: 'center center'  // ← これがないと回転の中心がズレます
-      }).addTo(map);
-      userAccCircle = L.circle(curr, { radius: accuracy||0, color:'#2b8', weight:1, fillOpacity:0.07 }).addTo(map);
-    }
 
     // ====== UIヘルパ ======
     const $ = s => document.querySelector(s);
     const setStatus = t => $('#status').textContent = t;
 
-    // --- 自動ズーム制御 ---
-      function autoZoomMaybe(distM, hereLatLng){
-        // 現在のターゲット（ラベル側のindexを採用）
-        const idx = window.DN_destLabelIndex?.();
-        if (idx == null) return;
-      
-        // ターゲットが変わったら状態リセット
-        if (__autoZoomTargetIdx !== idx) {
-          autoZoomReset(/*restore=*/false);
-          __autoZoomTargetIdx = idx;
-        }
-      
-        if (!__autoZoomed && distM <= APPROACH_ZOOM_IN_M) {
-          __autoZoomPrevZoom = map.getZoom();
-          __autoZoomed = true;
-          // 現在位置へ軽く寄せる（追従がONなら中心化されます）
-          map.flyTo(hereLatLng, APPROACH_ZOOM_LEVEL, { animate: true, duration: APPROACH_FLY_MS/1000 });
-        }
-      
-        if (__autoZoomed && distM >= APPROACH_ZOOM_OUT_M) {
-          // 近くまで寄った後、十分離れたら戻す
-          autoZoomRestore();
-        }
-      }
-      
-      function autoZoomRestore(){
-        if (!__autoZoomed) return;
-        const z = (__autoZoomPrevZoom ?? 15);
-        __autoZoomed = false;
-        __autoZoomPrevZoom = null;
-        map.flyTo(map.getCenter(), z, { animate: true, duration: APPROACH_FLY_MS/1000 });
-      }
-      
-      function autoZoomReset(restore=true){
-        if (restore) autoZoomRestore();
-        __autoZoomed = false;
-        __autoZoomPrevZoom = null;
-      }
+    // ====== 状態（到着・自動ズーム・コンパス） ======
+    let __arriveSinceTs = 0, __arriveCooldownUntil = 0;
+    let __autoZoomed = false, __autoZoomPrevZoom = null, __autoZoomTargetIdx = null;
+    let __compassHeading = null, __headingLPF = null;
 
     // ====== イベント配線 ======
     $('#btnFit').addEventListener('click', fitAll);
     $('#btnPrev').addEventListener('click', e=>{ e.preventDefault(); stepCSV(-1); });
     $('#btnNext').addEventListener('click', e=>{ e.preventDefault(); stepCSV(+1); });
+    $('#btnQR').addEventListener('click', showQR);
+    $('#qrClose').addEventListener('click', ()=>{ $('#qrModal').style.display='none'; });
+
     $('#btnGPS').addEventListener('click', startGPS);
     $('#btnStop').addEventListener('click', stopGPS);
-    $('#btnQR').addEventListener('click', showQR);
-    $('#qrClose').addEventListener('click', ()=>{ $('#qrModal').style.display='flex' === 'x' ? 0 : $('#qrModal').style.display='none'; $('#qrModal').style.display='none'; });
+    $('#btnHUD').addEventListener('click', ()=> setHUD(!document.body.classList.contains('hud')) );
+
     $('#chkFollow').addEventListener('change', e=>{ followMode=e.target.checked; if(followMode && lastLatLng) map.setView(lastLatLng, map.getZoom(), {animate:false}); });
     $('#chkHeading').addEventListener('change', e=>{ rotateToHeading=e.target.checked; if(userMarker?.setRotationAngle) userMarker.setRotationAngle(rotateToHeading?lastHeading:0); });
-    document.getElementById('btnHUD').addEventListener('click', ()=>{
-      setHUD(!document.body.classList.contains('hud'));
-    });
 
-    // Menuボタンで操作パネルの表示/非表示
     $('#rcMenu').addEventListener('click', ()=>{
       const p = document.querySelector('.panel'); if(!p) return;
       p.style.display = (p.style.display==='none') ? 'block' : 'none';
     });
 
-    // 起動時にHUD/左右反転オプション復元
+    // 起動時にHUD/反転オプション復元
+    if (localStorage.getItem('dnHudOn')==='1') document.body.classList.add('hud');
     if (localStorage.getItem('dnHudFlip')==='1') document.body.classList.add('hud-flip');
     if (localStorage.getItem('dnTurnInvert')==='1') document.body.classList.add('turn-invert');
+    window.DN_requestHUD = (want)=>{ if (!HUD_MANUAL_ONLY) setHUD(!!want); }; // 自動要求は無視
 
     // ====== 初期ロード ======
     Promise.all([loadOfficialRoute(), loadCSV()])
@@ -348,33 +237,28 @@
       destMarkers.forEach(m=>map.removeLayer(m)); destMarkers=[];
       if (plannedLayer){ map.removeLayer(plannedLayer); plannedLayer=null; }
 
-      csvRows.forEach((d,i)=>{
+      csvRows.forEach((d)=>{
         if (Number.isFinite(d.lat) && Number.isFinite(d.lng)) {
           const m = L.marker([d.lat,d.lng]).addTo(map);
           destMarkers.push(m);
         }
       });
 
-      // assist側へ登録 → 起動直後は「次だけ」
+      // Assistへ登録 → 起動直後は「次だけ」
       window.DN_registerDestinationMarkers && window.DN_registerDestinationMarkers(destMarkers, map);
       window.DN_setMarkerMode && window.DN_setMarkerMode('next');
 
-      // 予定線（任意）
+      const rad = $('#radius'); if (rad){ rad.min=MIN_RADIUS; rad.step=1; if ((parseFloat(rad.value)||0) < MIN_RADIUS) rad.value = MIN_RADIUS; }
+
       if (SHOW_PLANNED_LINE) {
-        const line = csvRows.filter(d=>Number.isFinite(d.lat)&&Number.isFinite(d.lng))
-                            .map(d=>[d.lat,d.lng]);
+        const line = csvRows.filter(d=>Number.isFinite(d.lat)&&Number.isFinite(d.lng)).map(d=>[d.lat,d.lng]);
         plannedLayer = L.polyline(line, { color:'#1e6bff', weight:3, dashArray:'6 6' }).addTo(map);
       }
 
-      // 到着半径のUI調整
-      const radInput = $('#radius');
-      if (radInput){ radInput.min = MIN_RADIUS; radInput.step = 1; if ((parseFloat(radInput.value)||0) < MIN_RADIUS) radInput.value = MIN_RADIUS; }
-
-      // カード初期表示
       setTimeout(()=>{ refreshCounterAndHighlight(); renderRouteCard(); }, 0);
     }
 
-    // ====== 公式ルート（FeatureCollection/MultiLine対応） ======
+    // ====== 公式ルート ======
     async function loadOfficialRoute(){
       const res = await fetch(OFFICIAL_ROUTE_URL + '?v=' + Date.now(), {cache:'no-store'});
       if(!res.ok) throw new Error('official-route.geojson not found');
@@ -420,7 +304,7 @@
       $('#rcNote').textContent  = rec?.note || rec?.備考 || '';
     }
 
-    // ====== CSV順の移動（前後） ======
+    // ====== CSV順 前後移動 ======
     let lastRec = null;
     function stepCSV(delta){
       const curr = window.DN_destLabelCurrent?.() || null;
@@ -430,7 +314,7 @@
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) map.panTo([rec.lat, rec.lng]);
       refreshCounterAndHighlight(rec, lastRec);
       renderRouteCard();
-      autoZoomReset(/*restore=*/true);  // ★ 追加：目的地を切り替えたら倍率を一度戻す
+      autoZoomReset(true); // 切替時は倍率を戻す
     }
 
     function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
@@ -471,41 +355,13 @@
     }
 
     // ====== GPS ======
-    let watchId = null, __arriveSinceTs = 0, __arriveCooldownUntil = 0;
+    let watchId = null;
     function startGPS(){
-      // startGPS() の先頭あたりに追加
-      enableCompass();   // ← ユーザー操作直後なのでiOSでも権限ダイアログを出せる
-      
-      // --- 追加：コンパス有効化とイベント処理 ---
-      let __compassHeading = null;
-      
-      function enableCompass(){
-        // iOS 13+ はユーザー操作後の許可が必要
-        if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-          DeviceOrientationEvent.requestPermission().then(res=>{
-            if (res === 'granted') {
-              window.addEventListener('deviceorientation', onDeviceOrientation, true);
-            }
-          }).catch(()=>{ /* 許可されない場合は黙ってGPS方位に任せる */ });
-        } else if (window.DeviceOrientationEvent) {
-          // Android等：そのまま受け取れる
-          window.addEventListener('deviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation', onDeviceOrientation, true);
-        }
-      }
-      
-      function onDeviceOrientation(e){
-        // 取得できる値はブラウザ・機種で異なる。alpha をコンパス方位に変換
-        // 一般的に alpha=0 が北、時計回り。スクリーン回転の影響を簡易無視して “北=0°” 基準へ。
-        const alpha = (typeof e.alpha === 'number') ? e.alpha : null;
-        if (alpha == null) return;
-        // コンパス方位（0=北, 時計回り）。見た目の進行方向合わせで 360 - alpha が直感的なことが多い。
-        const heading = (360 - alpha) % 360;
-        __compassHeading = heading;
-      }
-
       if(!('geolocation' in navigator)){ setStatus('この端末はGPS非対応'); return; }
       $('#btnGPS').disabled = true; $('#btnStop').disabled = false; setStatus('測位中…');
       liveTrack.setLatLngs([]);
+
+      enableCompass(); // コンパス許可（iOSはユーザー操作直後でOK）
 
       watchId = navigator.geolocation.watchPosition(onPos, onErr, {
         enableHighAccuracy:true, maximumAge:0, timeout:15000
@@ -521,28 +377,27 @@
 
       // 自位置
       if (!userMarker) {
-        userMarker = L.marker(curr, { icon:userIcon, rotationAngle:0, rotationOrigin:'center' }).addTo(map);
+        userMarker = L.marker(curr, { icon:userIcon, rotationAngle:0, rotationOrigin:'center center' }).addTo(map);
         userAccCircle = L.circle(curr, { radius: accuracy||0, color:'#2b8', weight:1, fillOpacity:0.07 }).addTo(map);
       } else {
         userMarker.setLatLng(curr);
         userAccCircle?.setLatLng(curr).setRadius(accuracy||0);
       }
 
-      // 進行方向
-      // --- onPos(pos) の中、最後の方位計算〜マーカー回転を以下に置き換え ---
-      let hdg = getHeadingFromSensors(pos, lastLatLng, curr);  // ↓関数は後述
-      if (rotateToHeading && userMarker.setRotationAngle) {
-        userMarker.setRotationAngle(hdg);
-      }
-      lastHeading = hdg;
-      lastLatLng  = curr;
+      // 進行方向（GPS course / コンパス / 直前ベクトル）
+      let hdg = getHeadingFromSensors(pos, lastLatLng, curr);
+      if (rotateToHeading && userMarker.setRotationAngle) userMarker.setRotationAngle(hdg);
+      lastHeading = hdg; lastLatLng = curr;
 
+      if (followMode) map.setView(curr, map.getZoom(), {animate:false});
+      liveTrack.addLatLng(curr);
 
-      // 到着判定（距離×精度・滞在）
+      // 到着判定・自動ズーム
       const rec = window.DN_destLabelCurrent?.();
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
         const d = distanceMeters(curr, [rec.lat, rec.lng]);
-        autoZoomMaybe(d, curr);  // ★ 追加：残距離に応じて自動ズーム制御
+        autoZoomMaybe(d, curr); // ← 近づいたらズーム
+
         const acc = accuracy ?? 30;
         const userR = parseFloat($('#radius').value) || 50;
         const autoR = Math.round(acc * 0.6 + 3);
@@ -560,14 +415,83 @@
         if (d <= effR && hasDwelled && isSlow && cooldownOK) {
           ping(); showArrive(rec);
           __arriveSinceTs = 0; __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
-          autoZoomReset(/*restore=*/true);  // ★ 追加：到着ポップアップと同時に元倍率へ
-          // 自動前進はテスト中なのでオフ（必要なら stepCSV(+1)）
+          autoZoomReset(true); // 到着時に倍率を戻す
         }
       }
     }
     function onErr(err){ setStatus('GPSエラー: ' + err.message); }
 
-    // ====== サウンド/バイブ/QR ======
+    // ====== コンパス ======
+    function enableCompass(){
+      if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().then(res=>{
+          if (res === 'granted') {
+            window.addEventListener('deviceorientation', onDeviceOrientation, true);
+          }
+        }).catch(()=>{});
+      } else if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation', onDeviceOrientation, true);
+      }
+    }
+    function onDeviceOrientation(e){
+      const alpha = (typeof e.alpha === 'number') ? e.alpha : null;
+      if (alpha == null) return;
+      const heading = (360 - alpha) % 360; // 北=0°
+      __compassHeading = heading;
+    }
+    function smoothHeading(deg){
+      if (__headingLPF == null) { __headingLPF = deg; return deg; }
+      let diff = ((deg - __headingLPF + 540) % 360) - 180;
+      __headingLPF = (__headingLPF + diff * 0.25 + 360) % 360;
+      return __headingLPF;
+    }
+    function getHeadingFromSensors(pos, lastLL, currLL){
+      const h = (pos.coords && Number.isFinite(pos.coords.heading)) ? pos.coords.heading : null;
+      const speed = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed : 0; // m/s
+      const slow  = speed < 1.5;
+      let cand = null;
+      if (!slow && h != null) cand = h;
+      else if (__compassHeading != null) cand = __compassHeading;
+      else if (lastLL) cand = bearing(lastLL, currLL);
+      else cand = lastHeading || 0;
+      return smoothHeading((cand + 360) % 360);
+    }
+
+    // ====== 到着ポップアップ ======
+    function showArrive(d){
+      const html = `<div><strong>到着:</strong> ${d.name||''}<br>
+        緯度:${Number.isFinite(d.lat)?d.lat.toFixed(6):'-'} / 経度:${Number.isFinite(d.lng)?d.lng.toFixed(6):'-'}</div>`;
+      if (Number.isFinite(d.lat) && Number.isFinite(d.lng)){
+        L.popup().setLatLng([d.lat,d.lng]).setContent(html).openOn(map);
+      }
+    }
+
+    // ====== 自動ズーム ======
+    function autoZoomMaybe(distM, hereLatLng){
+      const idx = window.DN_destLabelIndex?.();
+      if (idx == null) return;
+      if (__autoZoomTargetIdx !== idx) { autoZoomReset(false); __autoZoomTargetIdx = idx; }
+      if (!__autoZoomed && distM <= APPROACH_ZOOM_IN_M){
+        __autoZoomPrevZoom = map.getZoom(); __autoZoomed = true;
+        map.flyTo(hereLatLng, APPROACH_ZOOM_LEVEL, { animate:true, duration: APPROACH_FLY_MS/1000 });
+      }
+      if (__autoZoomed && distM >= APPROACH_ZOOM_OUT_M) autoZoomRestore();
+    }
+    function autoZoomRestore(){
+      if (!__autoZoomed) return;
+      const z = (__autoZoomPrevZoom ?? 15);
+      __autoZoomed = false; __autoZoomPrevZoom = null;
+      map.flyTo(map.getCenter(), z, { animate:true, duration: APPROACH_FLY_MS/1000 });
+    }
+    function autoZoomReset(restore=true){ if (restore) autoZoomRestore(); __autoZoomed=false; __autoZoomPrevZoom=null; }
+
+    // ====== HUD手動切替 ======
+    function setHUD(on){
+      document.body.classList.toggle('hud', !!on);
+      localStorage.setItem('dnHudOn', on ? '1' : '0');
+    }
+
+    // ====== サウンド/QR/距離 ======
     let audioCtx = null;
     function ping(){
       try{
@@ -588,8 +512,6 @@
       document.getElementById('qrUrl').textContent = url;
       document.getElementById('qrModal').style.display = 'flex';
     }
-
-    // ====== 距離・方位 ======
     function distanceMeters(a,b){
       const toR = x=>x*Math.PI/180, R=6371000;
       const dLat=toR(b[0]-a[0]), dLng=toR(b[1]-a[1]);
@@ -604,16 +526,7 @@
       return (toD(Math.atan2(y,x))+360)%360;
     }
 
-    // ====== 到着ポップアップ ======
-    function showArrive(d){
-      const html = `<div><strong>到着:</strong> ${d.name||''}<br>
-        緯度:${Number.isFinite(d.lat)?d.lat.toFixed(6):'-'} / 経度:${Number.isFinite(d.lng)?d.lng.toFixed(6):'-'}</div>`;
-      if (Number.isFinite(d.lat) && Number.isFinite(d.lng)){
-        L.popup().setLatLng([d.lat,d.lng]).setContent(html).openOn(map);
-      }
-    }
-
-    // ====== 地図オーバレイ（turns.js から呼ばれる想定。無くても安全） ======
+    // ====== 地図オーバレイ（turns.js から呼ばれる想定）=====
     window.DN_setMapOverlay = function(dir, bend, next, dist){
       const host = document.getElementById('turnOverlay');
       const cv   = document.getElementById('turnOverlayCv');
@@ -665,10 +578,11 @@
   }); // initApp
   </script>
 
-  <!-- Assist（destLabel / rideHud / turns などを起動） -->
+  <!-- Assist（destLabel / turns / rideHud など） -->
   <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
