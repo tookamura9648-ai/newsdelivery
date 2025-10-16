@@ -132,9 +132,6 @@
     const CSV_URL = './assets/data/points.csv'; // name,address,note,lat,lng（日本語列名も可）
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
     const SHOW_PLANNED_LINE = false;
-    // 到着で自動前進する
-    const AUTO_ADVANCE = true;
-
 
     // 到着判定・自動ズーム
     const MIN_RADIUS = 8, ARRIVE_DWELL_MS = 2000, SPEED_SLOW_KMH = 8, ARRIVE_COOLDOWN_MS = 10000;
@@ -188,7 +185,6 @@
 
     // ====== 状態（到着・自動ズーム・コンパス） ======
     let __arriveSinceTs = 0, __arriveCooldownUntil = 0;
-    let __arriveCandidateIdx = null; // その半径に入っている「対象のCSV行」
     let __autoZoomed = false, __autoZoomPrevZoom = null, __autoZoomTargetIdx = null;
     let __compassHeading = null, __headingLPF = null;
 
@@ -318,8 +314,6 @@
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) map.panTo([rec.lat, rec.lng]);
       refreshCounterAndHighlight(rec, lastRec);
       renderRouteCard();
-      __arriveSinceTs = 0;
-      __arriveCandidateIdx = null;   // ← 手動移動時の取りこぼし防止
       autoZoomReset(true); // 切替時は倍率を戻す
     }
 
@@ -402,48 +396,29 @@
       const rec = window.DN_destLabelCurrent?.();
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
         const d = distanceMeters(curr, [rec.lat, rec.lng]);
-        autoZoomMaybe(d, curr);
-      
-        const acc   = accuracy ?? 30;
+        autoZoomMaybe(d, curr); // ← 近づいたらズーム
+
+        const acc = accuracy ?? 30;
         const userR = parseFloat($('#radius').value) || 50;
         const autoR = Math.round(acc * 0.6 + 3);
         const effR  = Math.max(MIN_RADIUS, Math.min(userR, autoR));
-      
+
         const now = performance.now();
-        const speedKmh   = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed * 3.6 : null;
-        const isSlow     = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
+        const speedKmh = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed * 3.6 : null;
+        const isSlow = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
         const cooldownOK = now >= __arriveCooldownUntil;
-      
-        // ▼ 追加：今のターゲットIndexを取得
-        const idx = window.DN_destLabelIndex?.();
-      
-        // 半径に入っている／出た の管理（候補idxを記録/破棄）
-        if (d <= effR) {
-          if (!__arriveSinceTs) __arriveSinceTs = now;
-          if (__arriveCandidateIdx == null) __arriveCandidateIdx = idx;   // ← 追加
-        } else {
-          __arriveSinceTs = 0;
-          __arriveCandidateIdx = null;                                     // ← 追加
-        }
-      
+
+        if (d <= effR) { if (!__arriveSinceTs) __arriveSinceTs = now; } else { __arriveSinceTs = 0; }
         const hasDwelled = __arriveSinceTs && ((now - __arriveSinceTs) >= ARRIVE_DWELL_MS);
         setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m / 判定${effR}m`);
-      
-        // 到着確定：候補idxと一致する時だけ一度だけ進める
-        if (d <= effR && hasDwelled && isSlow && cooldownOK && idx === __arriveCandidateIdx) {
-          ping();
-          showArrive(rec);
-          __arriveSinceTs = 0;
-          __arriveCandidateIdx = null;                                     // ← 追加
-          __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
-          autoZoomReset(true);
-      
-          if (AUTO_ADVANCE) {
-            stepCSV(+1);   // ★ 自動で「次へ」
-          }
+
+        if (d <= effR && hasDwelled && isSlow && cooldownOK) {
+          ping(); showArrive(rec);
+          __arriveSinceTs = 0; __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
+          autoZoomReset(true); // 到着時に倍率を戻す
         }
       }
-
+    }
     function onErr(err){ setStatus('GPSエラー: ' + err.message); }
 
     // ====== コンパス ======
@@ -588,43 +563,26 @@
 
       stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
 
-            // 白ヘッド（進行方向）—— 安全版
-      {
-        const iw = Math.max(14, Math.round(body * 0.85));
-        const nx = -dirY;
-        const ny =  dirX;
-
-        const tip  = P3;
-        const base = { x: P3.x - dirX * (iw * 1.25), y: P3.y - dirY * (iw * 1.25) };
-        const L    = { x: base.x + nx * (iw * 0.70), y: base.y + ny * (iw * 0.70) };
-        const R    = { x: base.x - nx * (iw * 0.70), y: base.y - ny * (iw * 0.70) };
-
-        // 影
-        ctx.beginPath();
-        ctx.moveTo(tip.x, tip.y);
-        ctx.lineTo(L.x, L.y);
-        ctx.lineTo(R.x, R.y);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(0,0,0,0.35)';
-        ctx.fill();
-
-        // 白
-        ctx.beginPath();
-        ctx.moveTo(tip.x, tip.y);
-        ctx.lineTo(L.x, L.y);
-        ctx.lineTo(R.x, R.y);
-        ctx.closePath();
-        ctx.fillStyle = '#fff';
-        ctx.fill();
-      }
-    }; // ← ここで window.DN_setMapOverlay 関数を閉じる
+      // 白ヘッド（進行方向）
+      const iw = Math.max(14, Math.round(body*0.85));
+      const nx=-dirY, ny=dirX;
+      const tip=P3, base={x:P3.x-dirX*(iw*1.25), y:P3.y-dirY*(iw*1.25)},
+            L={x:base.x+nx*(iw*0.70), y:base.y+ny*(iw*0.70)},
+            R={x:base.x-nx*(iw*0.70), y:base.y-ny*(iw*0.70)};
+      ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+      ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
+      ctx.fillStyle='#fff'; ctx.fill();
+    };
 
   }); // initApp
   </script>
+
   <!-- Assist（destLabel / turns / rideHud など） -->
   <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
