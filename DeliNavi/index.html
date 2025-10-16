@@ -451,6 +451,7 @@
         if (d <= effR && hasDwelled && isSlow && cooldownOK) {
           ping(); showArrive(rec);
           __arriveSinceTs = 0; __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
+          autoZoomReset(/*restore=*/true);  // ★ 追加：到着ポップアップと同時に元倍率へ
           // 自動前進はテスト中なのでオフ（必要なら stepCSV(+1)）
         }
       }
