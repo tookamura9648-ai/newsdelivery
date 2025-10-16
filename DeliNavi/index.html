@@ -25,7 +25,7 @@
 
     /* 右上の操作パネル */
     .panel{
-      position:absolute;z-index:1000;left:10px;top:10px;background:#fff;
+      position:relative;z-index:1000;left:10px;top:10px;background:#fff;
       padding:10px 12px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.15)
     }
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
@@ -36,7 +36,7 @@
 
     /* ===== 順路カード（画面下） ===== */
     .route-card{
-      position:fixed; left:8px; right:8px; bottom:8px; z-index:9500;
+      position:relative; left:8px; right:8px; bottom:8px; z-index:9500;
       background:rgba(0,0,0,.82); color:#fff; border-radius:14px;
       padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
       display:flex; align-items:center; gap:10px; backdrop-filter:saturate(1.2) blur(2px);
@@ -57,9 +57,9 @@
      /* .route-card { justify-content: center; } /* 中央寄せにしたい場合 */
 
     /* 地図上の矢印オーバレイ */
-    .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
-    .turn-overlay.show{ display:block }
-    .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
+    /* .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
+    /* .turn-overlay.show{ display:block }
+    /* .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
 
     /* Leafletの番号ツールチップを常に非表示（番号バッジ非表示） */
     .leaflet-tooltip{ display:none !important }
