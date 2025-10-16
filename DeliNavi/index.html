@@ -162,7 +162,7 @@
     let __autoZoomed = false;
     let __autoZoomPrevZoom = null;
     let __autoZoomTargetIdx = null; // どの目的地を対象にしているか
-
+   
     // ====== 地図 ======
     const map = L.map('map', {zoomControl:true, preferCanvas:true}).setView([35.0,135.87], 13);
     window.__DN_map = map; // assistモジュール用
@@ -176,6 +176,39 @@
     }
     if (zc && zc._zoomOutButton) {
       zc._zoomOutButton.setAttribute('title','縮小'); zc._zoomOutButton.setAttribute('aria-label','縮小');
+    }
+    // 方位の平滑化（ガタつき防止）
+    let __headingLPF = null;
+    function smoothHeading(deg){
+      if (__headingLPF == null) { __headingLPF = deg; return deg; }
+      // 角度差の最短側で補間
+      const a = __headingLPF, b = deg;
+      let diff = ((b - a + 540) % 360) - 180; // -180..180
+      __headingLPF = (a + diff * 0.25 + 360) % 360; // 係数0.25でスムージング
+      return __headingLPF;
+    }
+    
+    // GPS / 速度 / 直前座標 / コンパスを使って“一番マシ”な方位を返す
+    function getHeadingFromSensors(pos, lastLL, currLL){
+      // 1) 端末が course(=heading) を返していれば最優先
+      const h = pos.coords && Number.isFinite(pos.coords.heading) ? pos.coords.heading : null;
+    
+      // 2) 速度が遅い/止まっているとGPS方位は不安定 → デバイスコンパスを使う
+      const speed = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed : 0; // m/s
+      const slow  = speed < 1.5; // ~5.4km/h未満を低速扱い
+    
+      let cand = null;
+      if (!slow && h != null) {
+        cand = h; // 走行中はGPSの進行方位が安定
+      } else if (__compassHeading != null) {
+        cand = __compassHeading; // 止まっている/低速時はコンパス
+      } else if (lastLL) {
+        // 3) コンパスがない時のフォールバック：直前座標→現在座標の方位
+        cand = bearing(lastLL, currLL);
+      } else {
+        cand = lastHeading || 0;
+      }
+      return smoothHeading((cand + 360) % 360);
     }
 
     // ====== 公式ルート表示 ======
@@ -206,6 +239,15 @@
     let userMarker = null, userAccCircle = null;
     let followMode = true, rotateToHeading = true;
     let lastLatLng = null, lastHeading = 0;
+    // 既存の userIcon はそのままでOK
+    if (!userMarker) {
+      userMarker = L.marker(curr, {
+        icon: userIcon,
+        rotationAngle: 0,
+        rotationOrigin: 'center center'  // ← これがないと回転の中心がズレます
+      }).addTo(map);
+      userAccCircle = L.circle(curr, { radius: accuracy||0, color:'#2b8', weight:1, fillOpacity:0.07 }).addTo(map);
+    }
 
     // ====== UIヘルパ ======
     const $ = s => document.querySelector(s);
@@ -423,6 +465,36 @@
     // ====== GPS ======
     let watchId = null, __arriveSinceTs = 0, __arriveCooldownUntil = 0;
     function startGPS(){
+      // startGPS() の先頭あたりに追加
+      enableCompass();   // ← ユーザー操作直後なのでiOSでも権限ダイアログを出せる
+      
+      // --- 追加：コンパス有効化とイベント処理 ---
+      let __compassHeading = null;
+      
+      function enableCompass(){
+        // iOS 13+ はユーザー操作後の許可が必要
+        if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+          DeviceOrientationEvent.requestPermission().then(res=>{
+            if (res === 'granted') {
+              window.addEventListener('deviceorientation', onDeviceOrientation, true);
+            }
+          }).catch(()=>{ /* 許可されない場合は黙ってGPS方位に任せる */ });
+        } else if (window.DeviceOrientationEvent) {
+          // Android等：そのまま受け取れる
+          window.addEventListener('deviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation', onDeviceOrientation, true);
+        }
+      }
+      
+      function onDeviceOrientation(e){
+        // 取得できる値はブラウザ・機種で異なる。alpha をコンパス方位に変換
+        // 一般的に alpha=0 が北、時計回り。スクリーン回転の影響を簡易無視して “北=0°” 基準へ。
+        const alpha = (typeof e.alpha === 'number') ? e.alpha : null;
+        if (alpha == null) return;
+        // コンパス方位（0=北, 時計回り）。見た目の進行方向合わせで 360 - alpha が直感的なことが多い。
+        const heading = (360 - alpha) % 360;
+        __compassHeading = heading;
+      }
+
       if(!('geolocation' in navigator)){ setStatus('この端末はGPS非対応'); return; }
       $('#btnGPS').disabled = true; $('#btnStop').disabled = false; setStatus('測位中…');
       liveTrack.setLatLngs([]);
@@ -449,12 +521,14 @@
       }
 
       // 進行方向
-      let hdg = Number.isFinite(h) ? h : (lastLatLng ? bearing(lastLatLng, curr) : lastHeading||0);
-      if (rotateToHeading && userMarker.setRotationAngle) userMarker.setRotationAngle(hdg);
-      lastHeading = hdg; lastLatLng = curr;
+      // --- onPos(pos) の中、最後の方位計算〜マーカー回転を以下に置き換え ---
+      let hdg = getHeadingFromSensors(pos, lastLatLng, curr);  // ↓関数は後述
+      if (rotateToHeading && userMarker.setRotationAngle) {
+        userMarker.setRotationAngle(hdg);
+      }
+      lastHeading = hdg;
+      lastLatLng  = curr;
 
-      if (followMode) map.setView(curr, map.getZoom(), {animate:false});
-      liveTrack.addLatLng(curr);
 
       // 到着判定（距離×精度・滞在）
       const rec = window.DN_destLabelCurrent?.();
