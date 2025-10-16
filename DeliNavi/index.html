@@ -49,6 +49,12 @@
 
     /* HUD中はカード非表示 */
     body.hud .route-card{ display:none }
+    /* 順路カードのテキスト群を非表示、Menuボタンだけ残す */
+    .route-card .meta { display: none !important; }
+    
+    /* ボタンを右下に寄せたい/中央に置きたい場合の例 */
+    .route-card { justify-content: flex-end; }   /* 右寄せ */
+     /* .route-card { justify-content: center; } /* 中央寄せにしたい場合 */
 
     /* 地図上の矢印オーバレイ */
     .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
