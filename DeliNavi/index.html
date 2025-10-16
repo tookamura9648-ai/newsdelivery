@@ -100,6 +100,8 @@
     <div class="row">
       <button class="btn" id="btnGPS">GPS開始</button>
       <button class="btn" id="btnStop" disabled>停止</button>
+      <!-- 例：GPSボタンの隣 -->
+      <button class="btn" id="btnHUD">HUD</button>
       <label class="small">到着半径 <input type="number" id="radius" value="50" style="width:4.5em"> m</label>
     </div>
     <div class="row">
@@ -125,6 +127,22 @@
     else fn();
   })
   (function initApp(){
+    // ▼ 追加：HUDは手動のみ
+    const HUD_MANUAL_ONLY = true;
+    
+    // 手動トグル用の関数（他所はこの関数だけ呼ぶ想定）
+    function setHUD(on){
+      document.body.classList.toggle('hud', !!on);
+      localStorage.setItem('dnHudOn', on ? '1' : '0');
+    }
+    
+    // 起動時に前回状態を復元（手動のみ許可）
+    if (localStorage.getItem('dnHudOn') === '1') setHUD(true);
+    
+    // 自動要求が来ても無視する“受け口”（turns.js等から呼ばれても弾く）
+    window.DN_requestHUD = (want)=>{
+      if (!HUD_MANUAL_ONLY) setHUD(!!want); // ← 手動のみなら無視
+    };
 
     // ====== 設定 ======
     const CSV_URL = './assets/data/points.csv'; // 列: name,address,note,lat,lng（日本語列名も対応）
@@ -242,6 +260,9 @@
     $('#qrClose').addEventListener('click', ()=>{ $('#qrModal').style.display='flex' === 'x' ? 0 : $('#qrModal').style.display='none'; $('#qrModal').style.display='none'; });
     $('#chkFollow').addEventListener('change', e=>{ followMode=e.target.checked; if(followMode && lastLatLng) map.setView(lastLatLng, map.getZoom(), {animate:false}); });
     $('#chkHeading').addEventListener('change', e=>{ rotateToHeading=e.target.checked; if(userMarker?.setRotationAngle) userMarker.setRotationAngle(rotateToHeading?lastHeading:0); });
+    document.getElementById('btnHUD').addEventListener('click', ()=>{
+      setHUD(!document.body.classList.contains('hud'));
+    });
 
     // Menuボタンで操作パネルの表示/非表示
     $('#rcMenu').addEventListener('click', ()=>{
