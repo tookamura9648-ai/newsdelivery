@@ -39,7 +39,15 @@
       position:top; left:8px; right:8px; bottom:8px; z-index:9500;
       background:rgba(0,0,0,.82); color:#fff; border-radius:14px;
       padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
-      display:flex; align-items:center; gap:10px; backdrop-filter:saturate(1.2) blur(2px);
+      display:flex; align-items:center; gap:10px; background: rgba(0,0,0,.90); 
+    }
+    /* backdrop-filter 対応環境だけ、ぼかし＋彩度UPを有効化 */
+    @supports ((-webkit-backdrop-filter: none) or (backdrop-filter: none)) {
+      .route-card{
+        background: rgba(0,0,0,.82);
+        -webkit-backdrop-filter: saturate(1.2) blur(2px); /* Safari用 */
+        backdrop-filter: saturate(1.2) blur(2px);         /* それ以外 */
+      }
     }
     .route-card .meta{flex:1 1 auto; min-width:0}
     .route-card .title{font-weight:800; font-size:20px; line-height:1.2; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
