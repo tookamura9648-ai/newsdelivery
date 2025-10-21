@@ -67,6 +67,11 @@
     #dn-hud-cv { transition: transform .15s ease; }
     body.hud-flip #dn-hud-cv { transform: rotate(180deg); }
 
+    #btnHUD.is-on{
+      background:#0a6; color:#fff; border-color:#095;
+    }
+
+
     /* 白い小カードは常に消す（turns.jsが出しても隠す） */
     #dn-turn-card, .dn-turn-card{ display:none !important; visibility:hidden !important; pointer-events:none !important; }
   </style>
@@ -208,10 +213,32 @@
     });
 
     // 起動時にHUD/反転オプション復元
-    if (localStorage.getItem('dnHudOn')==='1') document.body.classList.add('hud');
-    if (localStorage.getItem('dnHudFlip')==='1') document.body.classList.add('hud-flip');
-    if (localStorage.getItem('dnTurnInvert')==='1') document.body.classList.add('turn-invert');
-    window.DN_requestHUD = (want)=>{ if (!HUD_MANUAL_ONLY) setHUD(!!want); }; // 自動要求は無視
+    // 起動時に前回の状態を復元
+      if (localStorage.getItem('dnHudOn') === '1') {
+        document.body.classList.add('hud');
+      }
+      
+      // 切り替え関数（どこから呼んでもこれ1本）
+      function setHUD(on){
+        document.body.classList.toggle('hud', !!on);
+        localStorage.setItem('dnHudOn', on ? '1' : '0');
+        // ボタンの見た目（任意）
+        const b = document.getElementById('btnHUD');
+        if (b) b.classList.toggle('is-on', !!on);
+      }
+      
+      // ボタンでトグル
+      document.getElementById('btnHUD').addEventListener('click', ()=>{
+        const on = !document.body.classList.contains('hud');
+        setHUD(on);
+      });
+      
+      // （自動要求が来ても無視したい場合）
+      const HUD_MANUAL_ONLY = true;
+      window.DN_requestHUD = (want)=>{
+        if (!HUD_MANUAL_ONLY) setHUD(!!want); // 手動のみなら無視
+      };
+
 
     // ====== 初期ロード ======
     Promise.all([loadOfficialRoute(), loadCSV()])
