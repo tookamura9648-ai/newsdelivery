@@ -33,6 +33,7 @@
     .btn:disabled{opacity:.5;cursor:not-allowed}
     .badge{background:#111;color:#fff;border-radius:10px;padding:3px 8px;font-weight:700}
     .small{font-size:12px;color:#666}
+    #btnHUD.is-on{ background:#0a6; color:#fff; border-color:#095; }
 
     /* ===== 下部の順路カード（黒） ===== */
     .route-card{
@@ -40,7 +41,7 @@
       background: rgba(0,0,0,.90);  /* フォールバック */
       color:#fff; border-radius:14px; padding:10px 12px; box-shadow:0 10px 24px rgba(0,0,0,.35);
       display:flex !important; align-items:center; gap:10px;
-      min-height:92px;  /* 矢印ラベルと同じ高さに固定 */
+      min-height:92px;
     }
     @supports ((-webkit-backdrop-filter: none) or (backdrop-filter: none)) {
       .route-card{
@@ -60,16 +61,14 @@
     .turn-overlay.show{ display:block }
     .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
 
-    /* Leafletの番号ツールチップは非表示（混雑防止） */
+    /* Leafletの番号ツールチップは非表示 */
     .leaflet-tooltip{ display:none !important }
 
-    /* HUDのキャンバス反転オプション（必要なら使う） */
+    /* HUDキャンバスの反転オプション（必要なら使う） */
     #dn-hud-cv { transition: transform .15s ease; }
     body.hud-flip #dn-hud-cv { transform: rotate(180deg); }
 
-    
-
-    /* 白い小カードは常に消す（turns.jsが出しても隠す） */
+    /* turns.jsの白い小カードは常に消す */
     #dn-turn-card, .dn-turn-card{ display:none !important; visibility:hidden !important; pointer-events:none !important; }
   </style>
 </head>
@@ -135,9 +134,10 @@
     const OFFICIAL_ROUTE_URL = './assets/routes/official-route.geojson';
     const SHOW_PLANNED_LINE = false;
 
-    // 到着判定・自動ズーム
+    // 到着判定・自動ズーム・自動前進
     const MIN_RADIUS = 8, ARRIVE_DWELL_MS = 2000, SPEED_SLOW_KMH = 8, ARRIVE_COOLDOWN_MS = 10000;
     const APPROACH_ZOOM_IN_M = 90, APPROACH_ZOOM_OUT_M = 140, APPROACH_ZOOM_LEVEL = 18, APPROACH_FLY_MS = 800;
+    const AUTO_ADVANCE = true;
 
     // HUDは手動のみ
     const HUD_MANUAL_ONLY = true;
@@ -148,7 +148,6 @@
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
       {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
 
-    // アクセシビリティ名
     const zc = map.zoomControl;
     if (zc && zc._zoomInButton) { zc._zoomInButton.setAttribute('title','拡大'); zc._zoomInButton.setAttribute('aria-label','拡大'); }
     if (zc && zc._zoomOutButton){ zc._zoomOutButton.setAttribute('title','縮小'); zc._zoomOutButton.setAttribute('aria-label','縮小'); }
@@ -185,8 +184,8 @@
     const $ = s => document.querySelector(s);
     const setStatus = t => $('#status').textContent = t;
 
-    // ====== 状態（到着・自動ズーム・コンパス） ======
-    let __arriveSinceTs = 0, __arriveCooldownUntil = 0;
+    // ====== 状態 ======
+    let __arriveSinceTs = 0, __arriveCooldownUntil = 0, __arriveCandidateIdx = null;
     let __autoZoomed = false, __autoZoomPrevZoom = null, __autoZoomTargetIdx = null;
     let __compassHeading = null, __headingLPF = null;
 
@@ -199,7 +198,22 @@
 
     $('#btnGPS').addEventListener('click', startGPS);
     $('#btnStop').addEventListener('click', stopGPS);
-    $('#btnHUD').addEventListener('click', ()=> setHUD(!document.body.classList.contains('hud')) );
+
+    // ==== HUDトグル（ボタン） ====
+    // 起動時に前回状態を復元
+    if (localStorage.getItem('dnHudOn') === '1') {
+      document.body.classList.add('hud');
+      $('#btnHUD').classList.add('is-on');
+    }
+    function setHUD(on){
+      document.body.classList.toggle('hud', !!on);
+      localStorage.setItem('dnHudOn', on ? '1' : '0');
+      const b = $('#btnHUD'); if (b) b.classList.toggle('is-on', !!on);
+    }
+    $('#btnHUD').addEventListener('click', ()=>{
+      setHUD(!document.body.classList.contains('hud'));
+    });
+    window.DN_requestHUD = (want)=>{ if (!HUD_MANUAL_ONLY) setHUD(!!want); }; // 自動要求は基本無視
 
     $('#chkFollow').addEventListener('change', e=>{ followMode=e.target.checked; if(followMode && lastLatLng) map.setView(lastLatLng, map.getZoom(), {animate:false}); });
     $('#chkHeading').addEventListener('change', e=>{ rotateToHeading=e.target.checked; if(userMarker?.setRotationAngle) userMarker.setRotationAngle(rotateToHeading?lastHeading:0); });
@@ -208,34 +222,6 @@
       const p = document.querySelector('.panel'); if(!p) return;
       p.style.display = (p.style.display==='none') ? 'block' : 'none';
     });
-
-    // 起動時にHUD/反転オプション復元
-    // 起動時に前回の状態を復元
-      if (localStorage.getItem('dnHudOn') === '1') {
-        document.body.classList.add('hud');
-      }
-      
-      // 切り替え関数（どこから呼んでもこれ1本）
-      function setHUD(on){
-        document.body.classList.toggle('hud', !!on);
-        localStorage.setItem('dnHudOn', on ? '1' : '0');
-        // ボタンの見た目（任意）
-        const b = document.getElementById('btnHUD');
-        if (b) b.classList.toggle('is-on', !!on);
-      }
-      
-      // ボタンでトグル
-      document.getElementById('btnHUD').addEventListener('click', ()=>{
-        const on = !document.body.classList.contains('hud');
-        setHUD(on);
-      });
-      
-      // （自動要求が来ても無視したい場合）
-      const HUD_MANUAL_ONLY = true;
-      window.DN_requestHUD = (want)=>{
-        if (!HUD_MANUAL_ONLY) setHUD(!!want); // 手動のみなら無視
-      };
-
 
     // ====== 初期ロード ======
     Promise.all([loadOfficialRoute(), loadCSV()])
@@ -338,7 +324,8 @@
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) map.panTo([rec.lat, rec.lng]);
       refreshCounterAndHighlight(rec, lastRec);
       renderRouteCard();
-      autoZoomReset(true); // 切替時は倍率を戻す
+      autoZoomReset(true);
+      __arriveSinceTs = 0; __arriveCandidateIdx = null; // 手動時は到着候補をリセット
     }
 
     function refreshCounterAndHighlight(nowRec = window.DN_destLabelCurrent?.(), prevRec = lastRec){
@@ -416,30 +403,39 @@
       if (followMode) map.setView(curr, map.getZoom(), {animate:false});
       liveTrack.addLatLng(curr);
 
-      // 到着判定・自動ズーム
+      // 到着判定・自動ズーム・自動前進
       const rec = window.DN_destLabelCurrent?.();
       if (rec && Number.isFinite(rec.lat) && Number.isFinite(rec.lng)) {
         const d = distanceMeters(curr, [rec.lat, rec.lng]);
-        autoZoomMaybe(d, curr); // ← 近づいたらズーム
+        autoZoomMaybe(d, curr);
 
-        const acc = accuracy ?? 30;
+        const acc   = accuracy ?? 30;
         const userR = parseFloat($('#radius').value) || 50;
         const autoR = Math.round(acc * 0.6 + 3);
         const effR  = Math.max(MIN_RADIUS, Math.min(userR, autoR));
 
         const now = performance.now();
-        const speedKmh = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed * 3.6 : null;
-        const isSlow = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
+        const speedKmh   = (pos.coords.speed != null && isFinite(pos.coords.speed)) ? pos.coords.speed * 3.6 : null;
+        const isSlow     = (speedKmh == null) ? true : (speedKmh <= SPEED_SLOW_KMH);
         const cooldownOK = now >= __arriveCooldownUntil;
+        const idx        = window.DN_destLabelIndex?.();
 
-        if (d <= effR) { if (!__arriveSinceTs) __arriveSinceTs = now; } else { __arriveSinceTs = 0; }
+        if (d <= effR) {
+          if (!__arriveSinceTs) __arriveSinceTs = now;
+          if (__arriveCandidateIdx == null) __arriveCandidateIdx = idx;
+        } else {
+          __arriveSinceTs = 0;
+          __arriveCandidateIdx = null;
+        }
+
         const hasDwelled = __arriveSinceTs && ((now - __arriveSinceTs) >= ARRIVE_DWELL_MS);
         setStatus(`精度±${Math.round(accuracy||0)}m / 目的地まで ${Math.round(d)}m / 判定${effR}m`);
 
-        if (d <= effR && hasDwelled && isSlow && cooldownOK) {
+        if (d <= effR && hasDwelled && isSlow && cooldownOK && idx === __arriveCandidateIdx) {
           ping(); showArrive(rec);
-          __arriveSinceTs = 0; __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
-          autoZoomReset(true); // 到着時に倍率を戻す
+          __arriveSinceTs = 0; __arriveCandidateIdx = null; __arriveCooldownUntil = now + ARRIVE_COOLDOWN_MS;
+          autoZoomReset(true);
+          if (AUTO_ADVANCE) stepCSV(+1); // 自動で「次へ」
         }
       }
     }
@@ -509,12 +505,6 @@
     }
     function autoZoomReset(restore=true){ if (restore) autoZoomRestore(); __autoZoomed=false; __autoZoomPrevZoom=null; }
 
-    // ====== HUD手動切替 ======
-    function setHUD(on){
-      document.body.classList.toggle('hud', !!on);
-      localStorage.setItem('dnHudOn', on ? '1' : '0');
-    }
-
     // ====== サウンド/QR/距離 ======
     let audioCtx = null;
     function ping(){
@@ -550,7 +540,7 @@
       return (toD(Math.atan2(y,x))+360)%360;
     }
 
-    // ====== 地図オーバレイ（turns.js から呼ばれる想定）=====
+    // ====== 地図オーバレイ（turns.js から呼ばれる）=====
     window.DN_setMapOverlay = function(dir, bend, next, dist){
       const host = document.getElementById('turnOverlay');
       const cv   = document.getElementById('turnOverlayCv');
@@ -588,15 +578,17 @@
       stroke(outline,'#0b3a5a'); stroke(body,'#12b24a');
 
       // 白ヘッド（進行方向）
-      const iw = Math.max(14, Math.round(body*0.85));
-      const nx=-dirY, ny=dirX;
-      const tip=P3, base={x:P3.x-dirX*(iw*1.25), y:P3.y-dirY*(iw*1.25)},
-            L={x:base.x+nx*(iw*0.70), y:base.y+ny*(iw*0.70)},
-            R={x:base.x-nx*(iw*0.70), y:base.y-ny*(iw*0.70)};
-      ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
-      ctx.fillStyle='rgba(0,0,0,0.35)'; ctx.fill();
-      ctx.beginPath(); ctx.moveTo(tip.x,tip.y); ctx.lineTo(L.x,L.y); ctx.lineTo(R.x,R.y); ctx.closePath();
-      ctx.fillStyle='#fff'; ctx.fill();
+      const iw = Math.max(14, Math.round(body * 0.85));
+      const nx = -dirY, ny = dirX;
+      const tip = P3;
+      const base = { x: P3.x - dirX * (iw * 1.25), y: P3.y - dirY * (iw * 1.25) };
+      const L = { x: base.x + nx * (iw * 0.70), y: base.y + ny * (iw * 0.70) };
+      const R = { x: base.x - nx * (iw * 0.70), y: base.y - ny * (iw * 0.70) };
+
+      ctx.beginPath(); ctx.moveTo(tip.x, tip.y); ctx.lineTo(L.x, L.y); ctx.lineTo(R.x, R.y); ctx.closePath();
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fill();
+      ctx.beginPath(); ctx.moveTo(tip.x, tip.y); ctx.lineTo(L.x, L.y); ctx.lineTo(R.x, R.y); ctx.closePath();
+      ctx.fillStyle = '#fff'; ctx.fill();
     };
 
   }); // initApp
@@ -606,6 +598,7 @@
   <script type="module" src="./src/assist/initAssist.js"></script>
 </body>
 </html>
+
 
 
 
