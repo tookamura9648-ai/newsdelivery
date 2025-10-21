@@ -57,9 +57,9 @@
     .route-card .menu-btn{flex:0 0 auto; padding:8px 12px; border-radius:9px; border:1px solid rgba(255,255,255,.25); background:#07445f; color:#fff; font-weight:700; cursor:pointer}
 
     /* 地図上の大矢印オーバレイ */
-    .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
-    .turn-overlay.show{ display:block }
-    .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
+    /* .turn-overlay{ position:fixed; inset:0; z-index:9400; pointer-events:none; display:none }
+    /* .turn-overlay.show{ display:block }
+    /* .turn-overlay canvas{ position:absolute; left:50%; top:50%; transform:translate(-50%,-60%); width:min(64vw,64vh); height:auto }
 
     /* Leafletの番号ツールチップは非表示 */
     .leaflet-tooltip{ display:none !important }
@@ -77,9 +77,9 @@
   <div id="map" aria-label="map"></div>
 
   <!-- 地図上の矢印オーバレイ -->
-  <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
+  <!-- <div id="turnOverlay" class="turn-overlay" aria-hidden="true">
     <canvas id="turnOverlayCv" width="512" height="512"></canvas>
-  </div>
+  </div> -->
 
   <!-- 下の順路カード（氏名・住所・備考＋Menu） -->
   <div id="routeCard" class="route-card" role="region" aria-label="次の配達先">
